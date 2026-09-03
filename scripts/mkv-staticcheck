@@ -1,0 +1,52 @@
+#!/usr/bin/env python3
+"""Separate real extras from disc furniture, by frame variation.
+
+MakeMKV rips a disc's menu backgrounds and logo cards as ordinary titles, and
+they land in Extras/ looking exactly like a creditless OP if you only check the
+runtime. But a menu card is a *still* held for 40-90 seconds: sample it and every
+frame is the same. A creditless OP, an English credit roll and a promo all move.
+
+So: hash frames at 1 fps and count how many distinct ones there are. Near-1 means
+disc furniture, not content.
+
+usage: staticcheck.py <file>...
+"""
+import subprocess
+import sys
+
+W, H = 9, 8
+
+
+def hashes(path, fps=1.0):
+    raw = subprocess.run(
+        ["ffmpeg", "-nostdin", "-v", "error", "-i", path,
+         "-vf", f"fps={fps},scale={W}:{H},format=gray", "-f", "rawvideo", "-"],
+        capture_output=True).stdout
+    size = W * H
+    out = []
+    for i in range(0, len(raw) - size + 1, size):
+        px = raw[i:i + size]
+        bits = 0
+        for row in range(H):
+            base = row * W
+            for col in range(W - 1):
+                bits = (bits << 1) | (1 if px[base + col] > px[base + col + 1] else 0)
+        out.append(bits)
+    return out
+
+
+def main():
+    print(f"{'frames':>6} {'distinct':>8} {'ratio':>6}  verdict   file")
+    for path in sys.argv[1:]:
+        hs = hashes(path)
+        if not hs:
+            print(f"{'?':>6} {'?':>8} {'?':>6}  UNREADABLE  {path}")
+            continue
+        distinct = len(set(hs))
+        ratio = distinct / len(hs)
+        verdict = "STATIC " if ratio <= 0.15 else "content"
+        print(f"{len(hs):>6} {distinct:>8} {ratio:>6.2f}  {verdict}  {path}")
+
+
+if __name__ == "__main__":
+    main()

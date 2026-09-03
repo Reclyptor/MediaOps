@@ -39,6 +39,7 @@ by convention — it is unrepresentable.
 | `mkv-fingerprint batch\|match` | prove episode adjacency from next-episode previews |
 | `mkv-dupcheck DIR TRACK` | is a track an alternate cut of another, or distinct content? |
 | `mkv-titlescan FILE OUT START END [STEP]` | hunt for an episode title card in the lower third |
+| `mkv-staticcheck FILE...` | is this a real extra, or a disc menu / logo card? |
 
 Every mutating tool is **dry-run by default** and needs `--go` to act.
 
@@ -73,6 +74,16 @@ lives, and tiles forty-odd strips into one readable image.
 result.** An instrument that finds nothing is indistinguishable from one pointed the
 wrong way — that mistake has been made here already.
 
+`mkv-staticcheck` guards the other end of the pipeline. MakeMKV rips a disc's menu
+backgrounds and logo cards as ordinary titles; they are the same length as a creditless
+OP, so filing by runtime alone puts them in `Extras/`. A menu card is a *still* held for
+40–90 seconds, so hashing at 1 fps and counting distinct frames separates them cleanly —
+0.01–0.04 for furniture against 0.76–0.99 for real content, with no overlap observed.
+
+Check what a disc's short tracks actually *are* before filing them. On one pass this
+caught three Funimation trailers for entirely unrelated shows sitting inside a series'
+Extras folder.
+
 ## The one thing to remember
 
 `mkv-bounds` **cannot tell you a cut lands in the right place.** A set of cuts
@@ -99,4 +110,10 @@ on its title card puts every cut one chapter late.
 Tools live in the image; **working state lives on the NAS** under
 `_pending/anime/_plans/` (`bin/`, `state/`). Iterating on a plan therefore never
 requires an image rebuild, and nothing important is ever kept in a scratchpad —
-the previous session lost its entire working set to a `/tmp` clear.
+one session lost its entire working set to a `/tmp` clear.
+
+This matters more than it looks. The deployment is `strategy: Recreate` with Flux image
+automation, so **pushing a new image redeploys the pod and kills anything running in it**,
+and `/work` is an `emptyDir` that goes with it. Long jobs must write to `/mnt/media`, and
+should be resumable — `mkv-fingerprint batch` skips work already on disk for exactly this
+reason.
