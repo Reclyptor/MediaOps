@@ -1,6 +1,6 @@
 # SPEC: mediaops — a permanent media-processing workbench on the cluster
 
-**Status:** DRAFT — awaiting approval. No implementation has begun.
+**Status:** IMPLEMENTED and deployed. Measured results in §9.
 **Drafted:** 2026-09-02
 **Deliverables:** a new image repo `Reclyptor/MediaOps` → `ghcr.io/reclyptor/mediaops`,
 and a new Flux app `apps/mediaops` in `Reclyptor/Kubernetes`.
@@ -277,3 +277,53 @@ later. Say the word if you want it called something else.
 5. Re-create the lost working set (`splitplan.json`, `corrections.json`) onto the
    NAS — recoverable from the previous session's transcript
 6. Only then: spot-check boundaries, split, verify, promote — series by series
+
+---
+
+## 9. Measured results (2026-09-03)
+
+All six steps of §8 are done. Numbers observed on the deployed pod, not estimated.
+
+### Throughput
+
+| Path | Sequential read | Real split, end to end |
+|---|---|---|
+| Workstation (WiFi) | — | **12.5 MB/s** source (18.5 GiB in 1481 s) |
+| Pod on `styxeon` (wired) | **618 MB/s** (8 GiB `dd`) | **183 MB/s** source (36.4 GiB in 198 s) |
+
+**14.6× faster end to end.** The `72 h → 14 h` figure in the earlier plan was an
+extrapolation from a workstation-side measurement and was too pessimistic: the
+full 3.15 TiB now projects to **~5.3 hours**, not 14.
+
+The gap between 618 MB/s read and 183 MB/s split is expected — a split reads and
+writes the same volume, so combined I/O is ~366 MB/s, and mkvmerge is
+single-threaded per job. Running several series concurrently should push the
+aggregate higher; styxeon has 16 cores and the limit is well above one job.
+
+### Split correctness
+
+Fate/Apocrypha S01D01, 36.410 GiB, `chapters:6,10,14,18,23` → 6 parts:
+
+```
+23.75 min each, 5.951 / 6.087 / 6.072 / 6.085 / 6.100 / 6.095 GiB, all clean
+parts total 36.391 GiB = 99.947% of source
+```
+
+Six episodes within 0.00 min of each other. The 0.053% shortfall is one set of
+MKV headers becoming six, plus the dropped Play-All chapter table.
+
+**The anchor was confirmed on frames, not on statistics.** At the first interior
+boundary: 1420 s is a night interior (episode 1), **1425 s is the black
+end-of-episode copyright card** (©東出祐一郎・TYPE-MOON / FAPC), and 1432 s is a
+daytime cold open. The cut lands exactly on the card. This is the check §6 says
+cannot be skipped, and it is cheap now — a contact sheet renders in seconds.
+
+Source left untouched; test output removed.
+
+### One defect found and fixed
+
+`mkv-frames` emitted "Fontconfig error: No writable cache directories" on every
+call. The labels still rendered, which is precisely the hazard — pages of benign
+noise are what a real error hides in. The image gives `media` no home directory,
+so the deployment now sets `HOME=/work` and `XDG_CACHE_HOME=/work/.cache` against
+the existing emptyDir. Zero errors after the change.
