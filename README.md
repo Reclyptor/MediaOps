@@ -36,6 +36,8 @@ by convention — it is unrepresentable.
 | `mkv-promote MANIFEST.json` | move verified files into the library, with accounting |
 | `mkv-order INVENTORY.jsonl SERIES` | prove a disc's track order IS episode order, from its Play-All |
 | `mkv-anilist "<search>"` | episode counts and titles from AniList |
+| `mkv-fingerprint batch\|match` | prove episode adjacency from next-episode previews |
+| `mkv-dupcheck DIR TRACK` | is a track an alternate cut of another, or distinct content? |
 
 Every mutating tool is **dry-run by default** and needs `--go` to act.
 
@@ -47,6 +49,18 @@ disc's episode files end to end and check whether their chapter marks reproduce 
 Play-All's. If they do, track order is episode order — proven from the disc's own
 authoring, no frames needed. It still cannot tell you *which* episode the first track
 is; that always needs content.
+
+When there is no Play-All — and no title card, and the subtitles are dialogue-only —
+`mkv-fingerprint` is the fallback that still works. Every episode's closing preview is
+built from clips of the *next* episode, so those frames literally occur in the successor.
+Reduce every frame to a 64-bit difference hash, then ask, all-pairs, which track's body
+contains this track's preview. On The Qwaser of Stigmata all 34 links came back with
+match 0.61–0.99 against runners-up of 0.07–0.39 — and it proved that one track was
+skipped by the chain entirely, which is how the surplus OVA was found.
+
+`mkv-dupcheck` answers the follow-up: a censored/uncensored pair or a director's cut
+shares most of its frames with its twin, whereas two different episodes of the same show
+share only their OP and ED — about 0.13 in practice.
 
 ## The one thing to remember
 

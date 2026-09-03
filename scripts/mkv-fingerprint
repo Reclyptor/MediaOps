@@ -1,0 +1,156 @@
+#!/usr/bin/env python3
+"""Prove episode adjacency from next-episode previews, by perceptual hash.
+
+Qwaser has no on-screen title card and its subtitle track is dialogue-only, so
+there is nothing to read. But every episode ends with a ~26 s preview built from
+clips of the NEXT episode -- those frames literally occur in the successor. So:
+
+  hash the preview frames of every track, hash the body frames of every track,
+  and the track whose body contains a preview's frames IS the successor.
+
+That is an objective, all-pairs test. It does not rely on MakeMKV's track order,
+on disc labels, or on my judgement about what a scene looks like.
+
+Frames are reduced to a 64-bit difference hash: ffmpeg scales each frame to 9x8
+grayscale and we compare horizontally adjacent pixels. No image library needed --
+ffmpeg hands us raw bytes.
+
+usage: mkv-fingerprint batch <jobs.tsv> <outdir> [workers]
+       mkv-fingerprint match <outdir>
+       mkv-fingerprint hash  <file> <preview_start_s|none> <out.json>
+
+jobs.tsv is one line per track: <path>\t<preview_start_s|none>\t<name>
+batch is resumable -- a finished fingerprint is never recomputed, which matters
+because a full series takes long enough to outlive a disconnected client.
+"""
+import json
+import os
+import subprocess
+import sys
+from concurrent.futures import ThreadPoolExecutor
+
+BODY_FPS = 2.0        # dense enough to catch a 1-2 s preview clip
+PREVIEW_FPS = 4.0
+W, H = 9, 8
+
+
+def _frames(path, fps, ss=None, to=None):
+    """-> list of 64-bit dHashes."""
+    cmd = ["ffmpeg", "-nostdin", "-v", "error"]
+    if ss is not None:
+        cmd += ["-ss", str(ss)]
+    if to is not None:
+        cmd += ["-t", str(to)]
+    cmd += ["-i", path,
+            "-vf", f"fps={fps},scale={W}:{H},format=gray",
+            "-f", "rawvideo", "-"]
+    raw = subprocess.run(cmd, capture_output=True).stdout
+    size = W * H
+    out = []
+    for i in range(0, len(raw) - size + 1, size):
+        px = raw[i:i + size]
+        bits = 0
+        for row in range(H):
+            base = row * W
+            for col in range(W - 1):
+                bits = (bits << 1) | (1 if px[base + col] > px[base + col + 1] else 0)
+        out.append(bits)
+    return out
+
+
+def popcount(x):
+    return bin(x).count("1")
+
+
+def cmd_hash(path, preview_start, out):
+    rec = {
+        "path": path,
+        "preview_start": preview_start,
+        "body": _frames(path, BODY_FPS),
+        "preview": _frames(path, PREVIEW_FPS, ss=preview_start) if preview_start else [],
+    }
+    with open(out, "w") as fh:
+        json.dump(rec, fh)
+    print(f"{os.path.basename(path)}: {len(rec['body'])} body, "
+          f"{len(rec['preview'])} preview")
+
+
+def score(preview, body, thresh=6):
+    """Fraction of preview frames that occur somewhere in body."""
+    if not preview or not body:
+        return 0.0
+    hit = 0
+    for p in preview:
+        for b in body:
+            if popcount(p ^ b) <= thresh:
+                hit += 1
+                break
+    return hit / len(preview)
+
+
+def cmd_match(d):
+    recs = {}
+    for f in sorted(os.listdir(d)):
+        if f.endswith(".json"):
+            with open(os.path.join(d, f)) as fh:
+                recs[f[:-5]] = json.load(fh)
+
+    names = sorted(recs)
+    print(f"{len(names)} tracks\n")
+    for a in names:
+        pv = recs[a]["preview"]
+        if not pv:
+            print(f"{a}: no preview segment -- terminal episode or not part of a run")
+            continue
+        scored = sorted(((score(pv, recs[b]["body"]), b) for b in names if b != a),
+                        reverse=True)
+        best, second = scored[0], scored[1]
+        gap = best[0] - second[0]
+        verdict = "CONFIDENT" if best[0] >= 0.30 and gap >= 0.15 else "weak"
+        print(f"{a} -> {best[1]}  (match {best[0]:.2f}, runner-up {second[1]} "
+              f"{second[0]:.2f}, gap {gap:.2f})  [{verdict}]")
+
+
+def cmd_batch(jobs, outdir, workers=6):
+    os.makedirs(outdir, exist_ok=True)
+    todo = []
+    for line in open(jobs):
+        line = line.rstrip("\n")
+        if not line:
+            continue
+        path, pv, name = line.split("\t")
+        out = os.path.join(outdir, name + ".json")
+        if os.path.exists(out) and os.path.getsize(out) > 0:
+            print(f"  skip {name}")
+            continue
+        todo.append((path, pv, name, out))
+
+    def run(job):
+        path, pv, name, out = job
+        try:
+            cmd_hash(path, float(pv) if pv != "none" else None, out + ".part")
+            os.rename(out + ".part", out)
+            return f"  ok   {name}"
+        except Exception as exc:
+            if os.path.exists(out + ".part"):
+                os.unlink(out + ".part")
+            return f"  FAIL {name}: {exc}"
+
+    with ThreadPoolExecutor(max_workers=workers) as ex:
+        for line in ex.map(run, todo):
+            print(line, flush=True)
+
+
+if __name__ == "__main__":
+    if len(sys.argv) < 2:
+        sys.exit(__doc__.strip())
+    if sys.argv[1] == "batch":
+        cmd_batch(sys.argv[2], sys.argv[3],
+                  int(sys.argv[4]) if len(sys.argv) > 4 else 6)
+    elif sys.argv[1] == "hash":
+        cmd_hash(sys.argv[2], float(sys.argv[3]) if sys.argv[3] != "none" else None,
+                 sys.argv[4])
+    elif sys.argv[1] == "match":
+        cmd_match(sys.argv[2])
+    else:
+        sys.exit(__doc__.strip())

@@ -1,0 +1,36 @@
+#!/usr/bin/env python3
+"""Is a track an alternate cut of another, or genuinely distinct content?
+
+Compares one track's body fingerprint against every other track's. A censored /
+uncensored pair or a director's cut shares most of its frames; two different
+episodes of the same show share almost none.
+
+usage: dupcheck.py <fp-dir> <track-name>
+"""
+import json, os, sys
+
+def pc(x): return bin(x).count("1")
+
+def overlap(a, b, thresh=6):
+    hit = 0
+    for p in a:
+        for q in b:
+            if pc(p ^ q) <= thresh:
+                hit += 1
+                break
+    return hit / len(a)
+
+d, target = sys.argv[1], sys.argv[2]
+recs = {f[:-5]: json.load(open(os.path.join(d, f)))
+        for f in os.listdir(d) if f.endswith(".json")}
+body = recs[target]["body"]
+scored = sorted(((overlap(body, recs[k]["body"]), k) for k in recs if k != target),
+                reverse=True)
+print(f"{target} body vs all others:")
+for s, k in scored[:6]:
+    print(f"   {k}  {s:.3f}")
+print(f"   ... lowest {scored[-1][1]} {scored[-1][0]:.3f}")
+ctrl = [k for k in recs if k != target][:2]
+print(f"\ncontrol, two known-different episodes "
+      f"({ctrl[0]} vs {ctrl[1]}): "
+      f"{overlap(recs[ctrl[0]]['body'], recs[ctrl[1]]['body']):.3f}")
