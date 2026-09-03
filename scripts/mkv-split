@@ -1,0 +1,106 @@
+#!/usr/bin/env python3
+"""Split a Play-All track on chapter numbers, then prove the result.
+
+usage: mkv-split FILE OUTDIR/PREFIX CH,CH,CH [--go]
+
+CH,CH,CH are 1-based chapter numbers at which a NEW file starts -- exactly what
+`mkvmerge --split chapters:` expects, and what mkv-bounds prints. Splitting on
+chapter numbers is keyframe-exact; splitting on timecodes is not.
+
+This is a stream copy. No re-encode, no quality loss, and the source is never
+touched: nothing is deleted or overwritten here under any flag.
+"""
+import os
+import subprocess
+import sys
+
+from mkvlib import chapters, decode_check, duration
+
+
+def main():
+    if len(sys.argv) < 4:
+        sys.exit(__doc__.strip())
+
+    src, prefix, chlist = sys.argv[1], sys.argv[2], sys.argv[3]
+    go = "--go" in sys.argv
+
+    if not os.path.isfile(src):
+        sys.exit(f"FATAL: no such file: {src}")
+    try:
+        cuts = [int(x) for x in chlist.split(",") if x.strip()]
+    except ValueError:
+        sys.exit(f"FATAL: chapter list must be integers, got {chlist!r}")
+
+    st = chapters(src)
+    if not st:
+        sys.exit("FATAL: source has no chapters")
+    for c in cuts:
+        if not 2 <= c <= len(st):
+            sys.exit(f"FATAL: chapter {c} out of range (source has {len(st)})")
+
+    expected = len(cuts) + 1
+    src_bytes = os.path.getsize(src)
+    print(f"source   {src}")
+    print(f"         {duration(src):.2f} min, {len(st)} chapters, {src_bytes/2**30:.3f} GiB")
+    print(f"split at chapters {cuts} -> {expected} parts")
+    print(f"output   {prefix}-NNN.mkv")
+
+    if not go:
+        print("\ndry run -- pass --go to execute")
+        return
+
+    outdir = os.path.dirname(prefix)
+    if outdir:
+        os.makedirs(outdir, exist_ok=True)
+
+    existing = _parts(prefix)
+    if existing:
+        sys.exit(f"FATAL: {len(existing)} output files already exist for {prefix}; "
+                 "refusing to overwrite")
+
+    cmd = ["mkvmerge", "-o", f"{prefix}-%03d.mkv",
+           "--split", "chapters:" + ",".join(str(c) for c in cuts), src]
+    print("\n$ " + " ".join(cmd))
+    r = subprocess.run(cmd, capture_output=True, text=True)
+    # mkvmerge uses exit 1 for warnings (which are routine here) and 2 for errors.
+    if r.returncode >= 2:
+        sys.exit(f"FATAL: mkvmerge failed:\n{r.stdout[-2000:]}")
+
+    parts = _parts(prefix)
+    print(f"\n{len(parts)} parts written")
+    if len(parts) != expected:
+        sys.exit(f"FATAL: expected {expected} parts, got {len(parts)}")
+
+    total = 0
+    ok = True
+    for p in parts:
+        size = os.path.getsize(p)
+        total += size
+        _p, good, detail = decode_check(p)
+        mins = duration(p) or 0.0
+        print(f"  {os.path.basename(p):28s} {mins:6.2f} min  {size/2**30:6.3f} GiB  "
+              f"{'clean' if good else 'BAD: ' + detail}")
+        ok = ok and good
+
+    pct = 100.0 * total / src_bytes
+    print(f"\nparts total {total/2**30:.3f} GiB = {pct:.3f}% of source")
+    # One set of MKV headers becomes N, and the Play-All's chapter table is
+    # dropped, so a small shortfall is expected. A large one is not.
+    if not 99.0 <= pct <= 100.5:
+        sys.exit(f"FATAL: byte accounting off ({pct:.3f}%) -- inspect before trusting")
+    if not ok:
+        sys.exit("FATAL: at least one part failed its decode check")
+    print("all parts clean; source left untouched")
+
+
+def _parts(prefix):
+    d = os.path.dirname(prefix) or "."
+    base = os.path.basename(prefix)
+    if not os.path.isdir(d):
+        return []
+    return sorted(os.path.join(d, f) for f in os.listdir(d)
+                  if f.startswith(base + "-") and f.endswith(".mkv"))
+
+
+if __name__ == "__main__":
+    main()

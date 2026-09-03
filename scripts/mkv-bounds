@@ -1,0 +1,49 @@
+#!/usr/bin/env python3
+"""Find the episode boundaries in a MakeMKV Play-All track.
+
+usage: mkv-bounds FILE EPISODE_MINUTES
+
+EPISODE_MINUTES is the series' published per-episode runtime, and it is required.
+Without it the scan happily locks onto HALF an episode: anime discs put a chapter
+at the mid-episode eyecatch, so E=12 fits a 24-minute show just as tightly as
+E=24. Sailor Moon Disc 01 read as 16 episodes instead of 8 that way.
+"""
+import sys
+
+from mkvlib import (chapters, detect, duration, grade, split_chapter_indices)
+
+
+def main():
+    if len(sys.argv) < 3:
+        sys.exit(__doc__.strip())
+
+    path = sys.argv[1]
+    hint = float(sys.argv[2])
+
+    d = duration(path)
+    st = chapters(path)
+    if not st:
+        sys.exit(f"no chapters in {path} -- nothing to split on")
+
+    r = detect(d, st, hint=hint)
+    if not r:
+        print(f"NO CLEAN PATTERN  dur={d:.2f}m chapters={len(st)}")
+        sys.exit(1)
+
+    b, ep, err, tail = r
+    g = grade(ep, err, hint)
+    print(f"dur={d:.2f}m chapters={len(st)}  EPISODES={len(b)}  ep~{ep:.2f}m  "
+          f"fit_err={err:.3f}m  last={tail:.2f}m  [{g}]")
+    print("boundaries(min): " + " ".join(f"{x:.2f}" for x in b))
+    print("seconds:         " + " ".join(f"{x*60:.0f}" for x in b))
+    print("split:           chapters:" +
+          ",".join(str(i) for i in split_chapter_indices(st, b)))
+    print()
+    print("A constant offset is INVISIBLE to every statistic above -- cuts shifted")
+    print("by the same amount have the same stride, spread, fit error and episode")
+    print("length as the correct ones. Verify one interior boundary with mkv-frames")
+    print("before splitting. Roughly a third of checked tracks were anchored wrong.")
+
+
+if __name__ == "__main__":
+    main()

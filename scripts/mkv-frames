@@ -1,0 +1,42 @@
+#!/usr/bin/env bash
+# Render timestamped frames from a file, tiled into one contact sheet.
+#
+#   mkv-frames FILE OUT.png 2600 2640 2670 2710 2724 2730
+#
+# This is the only tool here that can confirm a cut lands in the right place.
+# The episode grammar to read for:
+#   ED credits -> (post-ED bumper) -> next-episode preview -> CUT -> cold open
+#   -> OP -> the episode's own title card
+# The 次回予告 preview belongs to the OUTGOING episode. Anchoring on its title
+# card puts every cut one chapter late.
+set -euo pipefail
+
+if [ $# -lt 3 ]; then
+    sed -n '2,14p' "$0" | sed 's/^# \?//'
+    exit 1
+fi
+
+FILE="$1"; OUT="$2"; shift 2
+[ -f "$FILE" ] || { echo "no such file: $FILE" >&2; exit 1; }
+
+TMP=$(mktemp -d)
+trap 'rm -rf "$TMP"' EXIT
+
+i=0
+for t in "$@"; do
+    i=$((i + 1))
+    # -ss before -i seeks by keyframe and is orders of magnitude faster than a
+    # decode-through; frame-exactness is not needed to identify a scene.
+    ffmpeg -nostdin -v error -ss "$t" -i "$FILE" -frames:v 1 \
+        -vf "scale=640:-1,drawtext=text='${t}s':x=8:y=8:fontsize=28:fontcolor=yellow:box=1:boxcolor=black@0.6" \
+        "$TMP/$(printf %03d $i).png" -y
+done
+
+cols=3
+[ "$i" -lt 3 ] && cols="$i"
+rows=$(( (i + cols - 1) / cols ))
+
+ffmpeg -nostdin -v error -pattern_type glob -i "$TMP/*.png" \
+    -vf "tile=${cols}x${rows}" -frames:v 1 "$OUT" -y
+
+echo "$OUT  ($i frames, ${cols}x${rows})"
