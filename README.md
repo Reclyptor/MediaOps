@@ -38,11 +38,12 @@ by convention — it is unrepresentable.
 | `mkv-anilist "<search>"` | episode counts and titles from AniList |
 | `mkv-fingerprint batch\|match` | prove episode adjacency from next-episode previews |
 | `mkv-dupcheck DIR TRACK` | is a track an alternate cut of another, or distinct content? |
+| `mkv-titlescan FILE OUT START END [STEP]` | hunt for an episode title card in the lower third |
 
 Every mutating tool is **dry-run by default** and needs `--go` to act.
 
 Also on `PATH`: `mkvmerge`, `mkvpropedit`, `mkvinfo`, `mkvextract`, `ffmpeg`,
-`ffprobe`, `mediainfo`, `python3`, `jq`, `rsync`.
+`ffprobe`, `mediainfo`, `montage`, `python3`, `jq`, `rsync`.
 
 `mkv-order` is the cheapest verification here and worth reaching for first: lay a
 disc's episode files end to end and check whether their chapter marks reproduce the
@@ -61,6 +62,16 @@ skipped by the chain entirely, which is how the surplus OVA was found.
 `mkv-dupcheck` answers the follow-up: a censored/uncensored pair or a director's cut
 shares most of its frames with its twin, whereas two different episodes of the same show
 share only their OP and ED — about 0.13 in practice.
+
+`mkv-titlescan` exists because a show's title card is often a text overlay on an
+ordinary shot rather than a full-screen card, and it does not sit at a fixed offset —
+sampling a couple of guessed timestamps will miss it and leave you concluding the show
+has no titles. It samples densely, crops to the lower third where such an overlay
+lives, and tiles forty-odd strips into one readable image.
+
+**Run it against an episode whose card you have already seen before trusting a negative
+result.** An instrument that finds nothing is indistinguishable from one pointed the
+wrong way — that mistake has been made here already.
 
 ## The one thing to remember
 
