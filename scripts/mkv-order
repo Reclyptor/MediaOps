@@ -1,0 +1,68 @@
+#!/usr/bin/env python3
+"""Verify per-disc episode order against the disc's own Play-All.
+
+The Play-All is the disc authoring's own statement of episode order, and it is
+free evidence: if the episode files, laid end to end in track order, reproduce
+the Play-All's chapter marks, the track order IS the episode order. No frames
+needed.
+
+This does NOT establish which episode NUMBER the first track is -- only that the
+tracks are sequential. Anchoring the first episode still needs content.
+"""
+import json
+import sys
+
+TOL = 0.05      # minutes; chapter marks are exact, this only absorbs rounding
+
+
+def check(playall, eps):
+    """eps: episode records in track order. -> (ok, detail)"""
+    marks = playall["chapters"]
+    cursor = 0.0
+    consumed = 1                       # chapter 0 of the Play-All is episode 1's chapter 0
+    for i, e in enumerate(eps):
+        for c in e["chapters"][1:]:
+            target = cursor + c
+            if consumed >= len(marks):
+                return False, f"ran out of Play-All chapters at episode {i+1}"
+            if abs(marks[consumed] - target) > TOL:
+                return False, (f"episode {i+1} ({e['rel'].split('/')[-1]}) chapter "
+                               f"{c:.2f} -> expected {target:.2f}, "
+                               f"Play-All has {marks[consumed]:.2f}")
+            consumed += 1
+        cursor += e["dur"]
+        if i + 1 < len(eps):
+            if consumed >= len(marks) or abs(marks[consumed] - cursor) > TOL:
+                got = marks[consumed] if consumed < len(marks) else None
+                return False, (f"boundary after episode {i+1} expected at {cursor:.2f}, "
+                               f"Play-All has {got}")
+            consumed += 1
+    return True, f"{len(eps)} episodes, {consumed}/{len(marks)} chapters consumed"
+
+
+def main():
+    rows = [json.loads(x) for x in open(sys.argv[1]) if x.strip()]
+    series = sys.argv[2]
+    recs = [r for r in rows if "error" not in r and r["rel"].split("/")[2:3] == [series]]
+
+    discs = {}
+    for r in recs:
+        discs.setdefault("/".join(r["rel"].split("/")[3:-1]), []).append(r)
+
+    for disc in sorted(discs):
+        rs = sorted(discs[disc], key=lambda x: x["rel"])
+        playall = max(rs, key=lambda x: x["dur"])
+        eps = [r for r in rs if r is not playall and 15 <= r["dur"] <= 40]
+        if playall["dur"] < 40 or not eps:
+            print(f"{disc}: no Play-All to check against")
+            continue
+        ok, detail = check(playall, eps)
+        print(f"{disc}: {'ORDER CONFIRMED' if ok else 'MISMATCH'}  -- {detail}")
+        if not ok:
+            # Retry without the tracks the Play-All plainly does not contain.
+            total = sum(e["dur"] for e in eps)
+            print(f"    (sum of episode files {total:.2f}m vs Play-All {playall['dur']:.2f}m)")
+
+
+if __name__ == "__main__":
+    main()

@@ -34,11 +34,19 @@ by convention — it is unrepresentable.
 | `mkv-split FILE PREFIX CH,CH` | split on chapter numbers, then verify the result |
 | `mkv-archive MANIFEST.json` | move superseded library files into `_archive/` |
 | `mkv-promote MANIFEST.json` | move verified files into the library, with accounting |
+| `mkv-order INVENTORY.jsonl SERIES` | prove a disc's track order IS episode order, from its Play-All |
+| `mkv-anilist "<search>"` | episode counts and titles from AniList |
 
 Every mutating tool is **dry-run by default** and needs `--go` to act.
 
 Also on `PATH`: `mkvmerge`, `mkvpropedit`, `mkvinfo`, `mkvextract`, `ffmpeg`,
-`ffprobe`, `mediainfo`, `montage`, `python3`, `jq`, `rsync`.
+`ffprobe`, `mediainfo`, `python3`, `jq`, `rsync`.
+
+`mkv-order` is the cheapest verification here and worth reaching for first: lay a
+disc's episode files end to end and check whether their chapter marks reproduce the
+Play-All's. If they do, track order is episode order — proven from the disc's own
+authoring, no frames needed. It still cannot tell you *which* episode the first track
+is; that always needs content.
 
 ## The one thing to remember
 

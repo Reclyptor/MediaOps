@@ -1,0 +1,62 @@
+#!/usr/bin/env python3
+"""Fetch a series' episode titles from AniList.
+
+usage: anilist.py "<search>" [id]
+
+AniList returns 403 without a User-Agent header, so one is always sent.
+streamingEpisodes is the only place AniList exposes per-episode titles, and it
+is ordered but not numbered -- treat its order as advisory and verify on screen.
+"""
+import json
+import sys
+import urllib.request
+
+Q = """
+query ($s: String, $id: Int) {
+  Media(search: $s, id: $id, type: ANIME) {
+    id
+    title { romaji english native }
+    episodes
+    format
+    startDate { year }
+    streamingEpisodes { title }
+  }
+}
+"""
+
+
+def fetch(search, mid=None):
+    # `id` must be OMITTED, not sent as null: AniList treats an explicit null as
+    # "match id = null" and answers 404 even when the search term is good.
+    variables = {"id": mid} if mid else {"s": search}
+    body = json.dumps({"query": Q, "variables": variables}).encode()
+    req = urllib.request.Request(
+        "https://graphql.anilist.co", data=body,
+        headers={"Content-Type": "application/json",
+                 "Accept": "application/json",
+                 "User-Agent": "mediaops/1.0 (library normalisation)"})
+    with urllib.request.urlopen(req, timeout=30) as r:
+        payload = json.load(r)
+    if "errors" in payload:
+        sys.exit("AniList: " + json.dumps(payload["errors"])[:300])
+    return payload["data"]["Media"]
+
+
+def main():
+    if len(sys.argv) < 2:
+        sys.exit(__doc__.strip())
+    mid = int(sys.argv[2]) if len(sys.argv) > 2 else None
+    d = fetch(sys.argv[1], mid)
+    t = d["title"]
+    print(f"id={d['id']}  {t['romaji']}")
+    print(f"  english : {t['english']}")
+    print(f"  native  : {t['native']}")
+    print(f"  {d['format']}, {d['episodes']} episodes, {d['startDate']['year']}")
+    eps = d.get("streamingEpisodes") or []
+    print(f"  streamingEpisodes ({len(eps)}):")
+    for i, e in enumerate(eps, 1):
+        print(f"    {i:3d}  {e['title']}")
+
+
+if __name__ == "__main__":
+    main()
