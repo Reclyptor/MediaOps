@@ -1,31 +1,60 @@
 #!/usr/bin/env bash
-# titlescan.sh FILE OUT.png START END STEP
+# Hunt for an episode title card.
 #
-# Hunt for an episode title card. Qwaser renders the title as a text overlay in
-# the lower third of an ordinary shot, not as a full-screen card -- so this
-# samples densely, crops each frame to the bottom strip where such an overlay
-# lives, and tiles the strips. Forty-odd strips fit in one readable image, where
-# forty full frames would not.
+#   mkv-titlescan FILE OUT.png START END [STEP] [BAND]
+#
+#   BAND   height:offset as fractions of frame height, e.g.
+#            full          whole frame (DEFAULT)
+#            0.55          top 55%
+#            0.30:0.70     bottom 30%
+#            0.40:0.30     middle band
+#
+# A title card is often a text overlay on an ordinary shot rather than a
+# full-screen card, it is on screen for only ~4-5 seconds, and it does NOT sit at
+# a fixed offset -- the OP moves with the length of the cold open. So sample
+# densely and, until you know where a series puts its card, look at the WHOLE
+# frame.
+#
+# The default was once a hardcoded bottom third. That produced a false negative
+# on a series whose card renders upper-right, and nearly did on another whose
+# card sat just above the crop line -- both were then reported as "this show has
+# no title card", which is the worst possible failure for an identity check. A
+# narrow band is an optimisation to apply AFTER you have seen where the card is,
+# never a default.
 #
 # ALWAYS run this against an episode whose card you have already seen before
 # trusting a negative result. An instrument that silently finds nothing is
-# indistinguishable from one that is pointed the wrong way.
+# indistinguishable from one pointed the wrong way.
+#
+# (The anime-normalize skill ships `card-scan.sh`, which does the same job with a
+# top-biased band. Prefer it when working inside that skill; this exists so the
+# mediaops toolbox is self-contained.)
 set -euo pipefail
 
-F="$1"; OUT="$2"; START="$3"; END="$4"; STEP="${5:-3}"
-TMP=$(mktemp -d); trap 'rm -rf "$TMP"' EXIT
+F="${1:?usage: mkv-titlescan FILE OUT.png START END [STEP] [BAND]}"
+OUT="${2:?output png required}"
+START="${3:?start seconds required}"
+END="${4:?end seconds required}"
+STEP="${5:-3}"
+BAND="${6:-full}"
+[ -f "$F" ] || { echo "no such file: $F" >&2; exit 1; }
 
-i=0
-t="$START"
-while [ "$(echo "$t < $END" | bc)" -eq 1 ]; do
-    i=$((i + 1))
-    ffmpeg -nostdin -v error -ss "$t" -i "$F" -frames:v 1 \
-        -vf "crop=iw:ih*0.24:0:ih*0.74,scale=760:-1,drawtext=text='${t}':x=6:y=4:fontsize=22:fontcolor=yellow:box=1:boxcolor=black@0.75" \
-        -y "$TMP/$(printf %03d $i).png" 2>/dev/null || true
-    t=$(echo "$t + $STEP" | bc)
-done
+DUR=$(awk -v a="$END" -v b="$START" 'BEGIN{print a-b}')
+awk -v d="$DUR" 'BEGIN{exit !(d>0)}' || { echo "END must exceed START" >&2; exit 1; }
 
-rows=$(( (i + 1) / 2 ))
-ffmpeg -nostdin -v error -pattern_type glob -i "$TMP/*.png" \
-    -vf "tile=2x${rows}" -frames:v 1 "$OUT" -y
-echo "$OUT  ($i strips, 2x${rows})"
+case "$BAND" in
+    full|1|1.0|1.00) CROP="" ;;
+    *:*) h="${BAND%%:*}"; y="${BAND##*:}"; CROP="crop=iw:ih*${h}:0:ih*${y}," ;;
+    *)   CROP="crop=iw:ih*${BAND}:0:0," ;;
+esac
+
+N=$(awk -v d="$DUR" -v s="$STEP" 'BEGIN{n=int(d/s); if(n<1)n=1; print n}')
+# near-square tiling keeps the sheet readable at any window size
+COLS=$(awk -v n="$N" 'BEGIN{c=int(sqrt(n)+0.999); if(c<1)c=1; print c}')
+ROWS=$(( (N + COLS - 1) / COLS ))
+
+ffmpeg -nostdin -v error -ss "$START" -t "$DUR" -i "$F" \
+    -vf "fps=1/${STEP},${CROP}scale=340:-1,tile=${COLS}x${ROWS}" \
+    -frames:v 1 -y "$OUT"
+
+echo "$OUT  ($N frames, every ${STEP}s, ${START}..${END}s, band ${BAND}, ${COLS}x${ROWS})"

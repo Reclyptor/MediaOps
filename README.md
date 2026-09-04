@@ -38,7 +38,7 @@ by convention — it is unrepresentable.
 | `mkv-anilist "<search>"` | episode counts and titles from AniList |
 | `mkv-fingerprint batch\|match` | prove episode adjacency from next-episode previews |
 | `mkv-dupcheck DIR TRACK` | is a track an alternate cut of another, or distinct content? |
-| `mkv-titlescan FILE OUT START END [STEP]` | hunt for an episode title card in the lower third |
+| `mkv-titlescan FILE OUT START END [STEP] [BAND]` | hunt for an episode title card |
 | `mkv-staticcheck FILE...` | is this a real extra, or a disc menu / logo card? |
 
 Every mutating tool is **dry-run by default** and needs `--go` to act.
@@ -65,10 +65,17 @@ shares most of its frames with its twin, whereas two different episodes of the s
 share only their OP and ED — about 0.13 in practice.
 
 `mkv-titlescan` exists because a show's title card is often a text overlay on an
-ordinary shot rather than a full-screen card, and it does not sit at a fixed offset —
-sampling a couple of guessed timestamps will miss it and leave you concluding the show
-has no titles. It samples densely, crops to the lower third where such an overlay
-lives, and tiles forty-odd strips into one readable image.
+ordinary shot rather than a full-screen card, it is on screen for only ~4-5 seconds, and
+it does not sit at a fixed offset — the OP moves with the length of the cold open.
+Sampling a couple of guessed timestamps will miss it and leave you concluding the show
+has no titles.
+
+It defaults to the **whole frame**. An earlier version hardcoded the lower third, which
+produced a false negative on a series whose card renders upper-right and nearly did on
+another whose card sat just above the crop line — both were then written off as "no title
+card", the worst possible failure for an identity check. `BAND` (`0.55`, `0.30:0.70`, …)
+narrows the crop to gain resolution, but only *after* you know where that series puts its
+card.
 
 **Run it against an episode whose card you have already seen before trusting a negative
 result.** An instrument that finds nothing is indistinguishable from one pointed the
