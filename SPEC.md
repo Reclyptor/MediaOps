@@ -109,7 +109,7 @@ backlog and are the reason this is an image and not just a package list:
 | `mkv-frames` | render N timestamped frames from a file, tiled into one contact sheet |
 | `mkv-split` | drive `mkvmerge --split`, then verify part count, per-part duration and total-bytes-vs-source |
 | `mkv-promote` | manifest-driven mover with full accounting (see §5) |
-| `mkv-archive` | archive-before-promote, preserving relative path under `_archive/` |
+| `mkv-archive` | archive-before-promote into `<share>/_archive/`, preserving the path the file had within its share |
 
 **Split of responsibility:** stable tooling is baked into the image; *working
 state* — the split manifest, the content-verified corrections, run logs — lives
@@ -161,13 +161,39 @@ should be able to saturate the box.
 
 ### 4.2 Volume
 
-One mount: the **media root**, `/mnt/primary/videos` → `/mnt/media`, read-write.
+One mount **per NAS**, all beneath `/mnt/media`:
 
-A single root mount rather than seraex-style per-purpose subpaths, because the
-work spans `_pending/`, `_processing/`, `_archive/` and every category directory
-in one operation — an archive-then-promote
-move crosses three of them. Splitting it into narrower mounts would not reduce
-the blast radius, only obscure it.
+| Mount | Export |
+|---|---|
+| `/mnt/media/dxp6800` | `192.168.1.2:/mnt/primary/videos` |
+| `/mnt/media/dxp4800` | `192.168.1.3:/mnt/primary/videos` |
+| `/mnt/media/dxp4800/<category>` | `192.168.1.3:/mnt/primary/videos/<category>` — a nested export, its own filesystem |
+| `/mnt/asustor` | `192.168.1.5:/volume1/data` |
+
+A whole-share mount per NAS rather than seraex-style per-purpose subpaths,
+because the work spans `_pending/`, `_processing/`, `_archive/` and every
+category directory in one operation — an
+archive-then-promote move crosses three of them. Splitting it into narrower
+mounts would not reduce the blast radius, only obscure it.
+
+**`MEDIA_ROOT` is not itself a mount.** It began as one, back when dxp6800 was
+mounted directly at `/mnt/media`, and code written then could synthesize a
+sibling path like `MEDIA_ROOT/_archive` and be sure it landed on the share. It
+now resolves to the pod's **ephemeral overlay** — writable, silent, and discarded
+on the next redeploy, which `strategy: Recreate` plus Flux image automation makes
+routine. `mkv-archive` moved files there and reported success; the data survived
+only until the next image push.
+
+Two rules follow, and both are enforced in code:
+
+1. **Resolve the share from the file, never from `MEDIA_ROOT`.** `mkvlib.share_root()`
+   walks up to the nearest mount point. This also gets nested exports right:
+   a file under `dxp4800/<category>` archives to `dxp4800/<category>/_archive/`, because
+   that directory is a different filesystem from `dxp4800/`.
+2. **Refuse any move that crosses a filesystem boundary.** A `shutil.move` across
+   devices silently degrades from a rename into a copy-and-delete — slow, and on
+   an ephemeral destination, data loss. Comparing `st_dev` turns the whole class
+   of bug into a hard failure instead of a green log line.
 
 `securityContext: runAsUser 3000, runAsGroup 100, fsGroup 100` (M5).
 

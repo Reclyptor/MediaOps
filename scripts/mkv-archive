@@ -4,9 +4,14 @@
 usage: mkv-archive MANIFEST.json [--go]
 manifest: [{"path": "anime/Series/Movies/foo.mkv"}, ...]  (relative to MEDIA_ROOT)
 
-Moves each path to _archive/<same relative path>, preserving the layout it had.
-The archive is a frozen snapshot: nothing is renamed or restructured, so a file
-can always be put back exactly where it came from.
+Moves each path to <share>/_archive/<path relative to that share>, preserving the
+layout it had. The archive is a frozen snapshot: nothing is renamed or
+restructured, so a file can always be put back exactly where it came from.
+
+The archive lives on the SAME share as the file, resolved from the file itself.
+MEDIA_ROOT is no longer a mount -- it is a directory with one mount per NAS
+beneath it -- so a single MEDIA_ROOT/_archive would sit on the pod's ephemeral
+overlay and be lost at the next redeploy.
 
 This is how "replace" is done without ever deleting: archive the old, then
 promote the new. Nothing here removes data.
@@ -16,9 +21,34 @@ import os
 import shutil
 import sys
 
-from mkvlib import MEDIA_ROOT
+from mkvlib import MEDIA_ROOT, share_root
 
-ARCHIVE = os.path.join(MEDIA_ROOT, "_archive")
+
+def archive_dst(src):
+    """Archive path for `src`, on the same share, mirroring its layout."""
+    share = share_root(src)
+    return os.path.join(share, "_archive", os.path.relpath(src, share))
+
+
+def display(path):
+    """Path as the manifest writes them -- MEDIA_ROOT-relative, share included.
+
+    Printing share-relative paths would drop the share name, and two entries from
+    different NAS would render identically.
+    """
+    rel = os.path.relpath(path, MEDIA_ROOT)
+    return path if rel.startswith(os.pardir) else rel
+
+
+def existing_ancestor(path):
+    """Nearest ancestor of `path` that exists -- what a move would land beside."""
+    p = os.path.abspath(path)
+    while not os.path.exists(p):
+        parent = os.path.dirname(p)
+        if parent == p:
+            return p
+        p = parent
+    return p
 
 
 def main():
@@ -34,9 +64,17 @@ def main():
         src = os.path.join(MEDIA_ROOT, rel)
         if not os.path.isfile(src):
             sys.exit(f"FATAL: not a file: {src}")
-        dst = os.path.join(ARCHIVE, rel)
+        dst = archive_dst(src)
         if os.path.exists(dst):
             sys.exit(f"FATAL: archive destination occupied: {dst}")
+        # A cross-device move is a copy+delete, not a rename. It is also the
+        # signature of the archive resolving off the share -- onto the pod's
+        # overlay, where the file survives only until the next redeploy. Refuse.
+        if os.stat(existing_ancestor(dst)).st_dev != os.stat(src).st_dev:
+            sys.exit(f"FATAL: archive destination is on a different filesystem "
+                     f"than the source; refusing to move.\n"
+                     f"  src: {src}\n  dst: {dst}\n"
+                     f"  share resolved as: {share_root(src)}")
         moves.append((src, dst))
 
     dsts = [d for _s, d in moves]
@@ -46,7 +84,7 @@ def main():
     sizes = {s: os.path.getsize(s) for s, _d in moves}
     print(f"{len(moves)} files, {sum(sizes.values())/2**30:.2f} GiB")
     for s, d in moves:
-        print(f"  {os.path.relpath(s, MEDIA_ROOT)}\n    -> {os.path.relpath(d, MEDIA_ROOT)}")
+        print(f"  {display(s)}\n    -> {display(d)}")
 
     if not go:
         print("\ndry run -- pass --go to execute")
@@ -68,10 +106,13 @@ def main():
 
     print(f"archived {moved} files, {sum(sizes.values())/2**30:.2f} GiB, sources clear")
 
-    # Drop directories the archive emptied, but never climb out of MEDIA_ROOT.
+    # Drop directories the archive emptied, but never climb out of the share.
     for s, _d in moves:
+        stop = share_root(s)
         p = os.path.dirname(s)
-        while p.startswith(MEDIA_ROOT) and p != MEDIA_ROOT \
+        # startswith(stop + sep) rather than startswith(stop): the bare prefix
+        # test also matches a sibling share named like an extension of this one.
+        while p.startswith(stop + os.sep) \
                 and os.path.isdir(p) and not os.listdir(p):
             os.rmdir(p)
             p = os.path.dirname(p)

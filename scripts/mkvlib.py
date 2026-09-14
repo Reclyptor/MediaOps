@@ -17,6 +17,30 @@ import subprocess
 
 MEDIA_ROOT = os.environ.get("MEDIA_ROOT", "/mnt/media")
 
+
+def share_root(path):
+    """The share `path` actually lives on: its nearest enclosing mount point.
+
+    MEDIA_ROOT began as a single NFS mount, so a synthesized sibling such as
+    MEDIA_ROOT/_archive necessarily landed on that share. It is now a plain
+    container directory with one mount per NAS beneath it (dxp6800/, dxp4800/),
+    and that same sibling resolves to the pod's own overlay filesystem --
+    writable, silent, and discarded on the next redeploy. A `shutil.move` there
+    reports success and destroys the file at the next image roll.
+
+    Resolving the share from the file itself keeps working whether MEDIA_ROOT is
+    one mount or twenty, and needs no list of share names.
+    """
+    p = os.path.abspath(path)
+    if not os.path.isdir(p):
+        p = os.path.dirname(p)
+    while not os.path.ismount(p):
+        parent = os.path.dirname(p)
+        if parent == p:
+            return p
+        p = parent
+    return p
+
 # Plex-illegal characters. ':' and '?' have accepted substitutions; the rest are
 # simply dropped. Matches the anime-normalize skill.
 _ILLEGAL = str.maketrans({c: None for c in '/*"<>|\\'})
