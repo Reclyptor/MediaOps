@@ -234,8 +234,20 @@ deployment, so it is called out here rather than done silently.
 Every move is checked before anything is written, then verified after:
 
 1. no source file mapped twice; no two entries sharing a destination
-2. **every** on-disk source file appears in the manifest — an unmapped file is a
-   hard error, never a silent skip
+2. **every** on-disk source *video* file appears in the manifest — an unmapped
+   video is a hard error, never a silent skip. Non-video is deliberately out of
+   scope: a series' `Extras/` legitimately carries soundtrack FLACs, booklet
+   scans and cover art (one real series holds 1,297 of them), and demanding
+   those be mapped turns a correct plan into a hard failure and pushes the
+   operator toward a raw `mv` with no accounting at all — strictly worse. A
+   video that genuinely should stay put is declared explicitly with
+   `{"keep": "..."}` rather than omitted, so the intent is in the manifest.
+
+   > `VIDEO_EXT` is the definition of "video" here, and an extension missing
+   > from it is invisible to this check — the exact failure the step exists to
+   > prevent. It is kept in step with the enumeration in anime-normalize's
+   > `probe-tracks.sh`. The library is not mkv-only: `.hack//SIGN` is 27 `.ogm`
+   > files, and there are `.vob` and `.m4v` holdings besides.
 3. no destination path already occupied (M4)
 4. batch touch-validation of every destination directory before the first move
 5. `shutil.move`, then byte-size equality source↔destination

@@ -5,6 +5,7 @@ usage: mkv-promote MANIFEST.json [--go]
 manifest: [{"src": "_pending/anime/X/a.mkv",
             "dst": "anime/X/Season 01/X - S01E01 - Title.mkv",
             "title": "X - S01E01 - Title"},   # optional MKV segment title
+           {"keep": "anime/X/Extras/bundle/track.mkv"},  # stays put, on purpose
            ...]                                # paths relative to MEDIA_ROOT
 
 Nothing is deleted; nothing is overwritten. Every check below exists because a
@@ -24,6 +25,8 @@ from mkvlib import MEDIA_ROOT, decode_check
 def build(entries):
     moves = []
     for e in entries:
+        if "keep" in e:
+            continue
         src = os.path.join(MEDIA_ROOT, e["src"])
         dst = os.path.join(MEDIA_ROOT, e["dst"])
         if not os.path.isfile(src):
@@ -44,20 +47,39 @@ def build(entries):
     return moves
 
 
-def check_complete(entries, moves):
-    """Every file in every source directory must be accounted for.
+# Every container the library actually holds -- kept in step with the enumeration
+# in anime-normalize's probe-tracks.sh. An extension missing here is invisible to
+# check_complete below, which is the one failure this whole function exists to
+# prevent: .hack//SIGN is 27 .ogm files and the library also carries .vob and
+# .m4v, none of which an mkv-centric list would have accounted for.
+VIDEO_EXT = (".mkv", ".ogm", ".avi", ".mp4", ".m2ts", ".ts", ".m4v", ".wmv",
+             ".rmvb", ".mov", ".flv", ".webm", ".divx", ".mpg", ".mpeg", ".vob")
 
-    An unmapped file is a hard error, never a silent skip -- a promotion that
+
+def check_complete(entries, moves):
+    """Every VIDEO file in every source directory must be accounted for.
+
+    An unmapped video is a hard error, never a silent skip -- a promotion that
     quietly leaves three episodes behind looks exactly like a successful one.
+
+    Non-video is deliberately excluded. A series' Extras legitimately carries
+    soundtrack FLACs, booklet scans and cover art (SKILL.md, "Carry non-video
+    assets forward"), and one real series holds 1,297 of them. Demanding those be
+    mapped turns a correct plan into a hard failure and pushes the operator
+    toward a raw `mv` with no accounting at all -- strictly worse. Video is what
+    this tool moves, so video is what it accounts for.
     """
-    srcdirs = {os.path.dirname(os.path.join(MEDIA_ROOT, e["src"])) for e in entries}
+    srcdirs = {os.path.dirname(os.path.join(MEDIA_ROOT, e["src"]))
+               for e in entries if "src" in e}
+    kept = {os.path.join(MEDIA_ROOT, e["keep"]) for e in entries if "keep" in e}
     on_disk = set()
     for d in srcdirs:
         for root, _dirs, files in os.walk(d):
-            on_disk.update(os.path.join(root, f) for f in files)
-    missing = on_disk - {m[0] for m in moves}
+            on_disk.update(os.path.join(root, f) for f in files
+                           if f.lower().endswith(VIDEO_EXT))
+    missing = on_disk - {m[0] for m in moves} - kept
     if missing:
-        sys.exit(f"FATAL: {len(missing)} source files unaccounted for:\n  " +
+        sys.exit(f"FATAL: {len(missing)} source VIDEO files unaccounted for:\n  " +
                  "\n  ".join(sorted(missing)[:20]))
 
 
@@ -141,6 +163,8 @@ def main():
     print(f"set container titles on {titled} files")
 
     for e in entries:
+        if "keep" in e:
+            continue
         d = os.path.dirname(os.path.join(MEDIA_ROOT, e["src"]))
         while d.startswith(MEDIA_ROOT) and d != MEDIA_ROOT \
                 and os.path.isdir(d) and not os.listdir(d):
