@@ -12,9 +12,13 @@
 set -euo pipefail
 
 if [ $# -lt 3 ]; then
-    sed -n '2,14p' "$0" | sed 's/^# \?//'
+    sed -n '2,11p' "$0" | sed 's/^# \?//'
     exit 1
 fi
+
+# Group-writable by `users` is the library convention; the container default umask
+# of 022 would create these 644. `kubectl exec` bypasses CMD, so it is set per tool.
+umask 0007
 
 FILE="$1"; OUT="$2"; shift 2
 [ -f "$FILE" ] || { echo "no such file: $FILE" >&2; exit 1; }

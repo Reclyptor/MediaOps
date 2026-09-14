@@ -17,6 +17,23 @@ import subprocess
 
 MEDIA_ROOT = os.environ.get("MEDIA_ROOT", "/mnt/media")
 
+# Group-writability for `users` is the library convention. The NFS export supplies
+# the GROUP (anongid=100); the MODE comes from the creating process, and the
+# container default umask of 022 yields 644 files and 755 dirs -- no group write,
+# wrong every time. `kubectl exec` does NOT run CMD or ENTRYPOINT, so an
+# image-level wrapper cannot set this; the code that creates files must.
+#
+# This yields 660 files and 770 dirs. Note it does NOT reproduce the 770 seen on
+# existing media files: umask can only clear permission bits, never add the
+# execute bit, and nothing creates a file 0777 to begin with. That x bit is
+# meaningless on a .mkv; what matters -- group `users` has rw -- is satisfied.
+#
+# Every mkv-* python tool imports mkvlib, so setting it here covers all of them
+# at once. Import-time side effects are normally worth avoiding, but the
+# alternative is repeating it in a dozen entry points and silently omitting it
+# from the next one.
+os.umask(0o007)
+
 
 def share_root(path):
     """The share `path` actually lives on: its nearest enclosing mount point.

@@ -56,7 +56,27 @@ RUN adduser -u 3000 -G users -D -H -s /bin/bash media
 COPY --chown=3000:100 scripts/ /opt/mediaops/bin/
 RUN chmod 0755 /opt/mediaops/bin/*
 
+# The library convention is group-writable by `users`. The NFS export supplies the
+# GROUP (anongid=100); the MODE comes from the creating process, and the container
+# default umask of 022 yields 644 files and 755 dirs -- no group write, wrong every
+# time. umask 0007 gives 660 files and 770 dirs; it cannot give 770 files, because
+# umask only clears bits and never adds the execute bit.
+#
+# `kubectl exec` runs its command DIRECTLY: it does not go through CMD or
+# ENTRYPOINT, so neither can set a umask for exec'd work. Coverage is therefore
+# per-caller, in three places:
+#   - the python mkv-* tools  -> os.umask(0o007) in mkvlib.py, which they all import
+#   - mkv-frames, mkv-titlescan -> `umask 0007` in the script
+#   - `kubectl exec -- bash -c` -> BASH_ENV below, which bash sources even
+#                                  non-interactively
+# NOT covered: `kubectl exec -- sh -c '...'`. Alpine's /bin/sh is busybox ash,
+# which reads $ENV only when interactive, so an ad-hoc `sh -c 'mkdir ...'` still
+# inherits umask 022. Use `bash -c`, or chmod explicitly.
+RUN printf 'umask 0007\n' > /etc/mediaops-profile.sh \
+ && chmod 0644 /etc/mediaops-profile.sh
+
 ENV PATH="/opt/mediaops/bin:${PATH}" \
+    BASH_ENV="/etc/mediaops-profile.sh" \
     PYTHONPATH="/opt/mediaops/bin" \
     PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \

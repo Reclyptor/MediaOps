@@ -197,6 +197,29 @@ Two rules follow, and both are enforced in code:
 
 `securityContext: runAsUser 3000, runAsGroup 100, fsGroup 100` (M5).
 
+### 4.2.1 Ownership and mode
+
+`runAsGroup: 100` alone does not decide what lands on disk. Two separate things do:
+
+- **The group comes from the NFS export.** `/mnt/primary/videos` is exported
+  `all_squash,anonuid=3000,anongid=<gid>`, so every client writes as that identity
+  regardless of its own uid/gid. It was `anongid=3000` for a period, which put new
+  files in group `reclyptor` instead of `users` and made `chgrp` return EPERM even
+  to the owning uid — the server refuses a group the squashed identity is not in.
+  Corrected to `anongid=100`; a client-side fix was never possible.
+- **The mode comes from the creating process' umask,** and `kubectl exec` runs its
+  command directly — not through `CMD` or `ENTRYPOINT` — so the image cannot set it
+  centrally. It is set per caller: `os.umask(0o007)` in `mkvlib.py` (every python
+  `mkv-*` tool imports it), `umask 0007` in `mkv-frames` and `mkv-titlescan`, and
+  `BASH_ENV=/etc/mediaops-profile.sh` for `kubectl exec -- bash -c`.
+  **Not covered:** `kubectl exec -- sh -c`, since busybox ash reads `$ENV` only when
+  interactive. Ad-hoc `sh -c 'mkdir …'` still inherits 022.
+
+That yields 660 files and 770 dirs. It does not reproduce the 770 on existing media
+files: umask only clears bits, so nothing it does can add an execute bit that was
+never requested. The x bit is meaningless on a `.mkv`; group-write is the part that
+matters.
+
 ### 4.3 Network policy
 
 Egress only; no ingress, no Service.
