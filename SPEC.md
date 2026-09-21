@@ -109,7 +109,7 @@ backlog and are the reason this is an image and not just a package list:
 | `mkv-frames` | render N timestamped frames from a file, tiled into one contact sheet |
 | `mkv-split` | drive `mkvmerge --split`, then verify part count, per-part duration and total-bytes-vs-source |
 | `mkv-promote` | manifest-driven mover with full accounting (see §5) |
-| `mkv-archive` | archive-before-promote into `<share>/_archive/`, preserving the path the file had within its share |
+| `mkv-archive` | archive-before-promote into `$ARCHIVE_ROOT/<path within its share>`, preserving the layout the file had |
 
 **Split of responsibility:** stable tooling is baked into the image; *working
 state* — the split manifest, the content-verified corrections, run logs — lives
@@ -167,14 +167,22 @@ One mount **per NAS**, all beneath `/mnt/media`:
 |---|---|
 | `/mnt/media/dxp6800` | `192.168.1.2:/mnt/primary/videos` |
 | `/mnt/media/dxp4800` | `192.168.1.3:/mnt/primary/videos` |
-| `/mnt/media/dxp4800/<category>` | `192.168.1.3:/mnt/primary/videos/<category>` — a nested export, its own filesystem |
 | `/mnt/asustor` | `192.168.1.5:/volume1/data` |
 
+**Every entry is a dataset ROOT, and never a child dataset beneath one.** That is
+a privacy rule before it is a technical one, and it matches
+`NixOS/modules/workstation/nfs.nix` verbatim. The NAS serves each category as its
+own ZFS dataset and NFSv4 crosses into an exported child on first access, so
+naming the children would buy nothing — they are reachable through the root
+either way. What it *would* do is write the full set of category names into a
+public repository, and that set is itself the thing worth not publishing. The
+same reasoning is why `ARCHIVE_ROOT` arrives from a Secret (§4.2.1).
+
 A whole-share mount per NAS rather than seraex-style per-purpose subpaths,
-because the work spans `_pending/`, `_processing/`, `_archive/` and every
-category directory in one operation — an
-archive-then-promote move crosses three of them. Splitting it into narrower
-mounts would not reduce the blast radius, only obscure it.
+because the work spans the staging trees, the archive and every category
+directory in one operation — an archive-then-promote move crosses three of them.
+Splitting it into narrower mounts would not reduce the blast radius, only obscure
+it, and would put the category names in this file besides.
 
 **`MEDIA_ROOT` is not itself a mount.** It began as one, back when dxp6800 was
 mounted directly at `/mnt/media`, and code written then could synthesize a
@@ -184,20 +192,80 @@ on the next redeploy, which `strategy: Recreate` plus Flux image automation make
 routine. `mkv-archive` moved files there and reported success; the data survived
 only until the next image push.
 
-Two rules follow, and both are enforced in code:
+The rule that follows is enforced in code: **never synthesize an archive path
+from `MEDIA_ROOT`.** `/mnt/media` and `/` report the same `st_dev` (134), which is
+the whole bug in one number.
 
-1. **Resolve the share from the file, never from `MEDIA_ROOT`.** `mkvlib.share_root()`
-   walks up to the nearest mount point. This also gets nested exports right:
-   a file under `dxp4800/<category>` archives to `dxp4800/<category>/_archive/`, because
-   that directory is a different filesystem from `dxp4800/`.
-2. **Refuse any move that crosses a filesystem boundary.** A `shutil.move` across
-   devices silently degrades from a rename into a copy-and-delete — slow, and on
-   an ephemeral destination, data loss. Comparing `st_dev` turns the whole class
-   of bug into a hard failure instead of a green log line.
+### 4.2.1 The archive is one tree, on the box that is not being worked
+
+The archive used to live on the same share as the file, resolved from the file
+itself by `mkvlib.share_root()`. That made every archive move a rename, but it
+also scattered the archive across every NAS and let the working box fill up with
+material that is, by definition, never read again. It is now a single tree,
+configured by **`ARCHIVE_ROOT`**.
+
+The working categories stay on dxp6800 and the archive lives on dxp4800, and
+that split is permanent rather than a migration in progress. **Crossing a
+filesystem boundary is therefore the normal case for every archive move, not an
+exceptional one** — which is exactly what the previous design refused to do.
+
+`ARCHIVE_ROOT` has **no default**, unlike `MEDIA_ROOT`. The risk is asymmetric: a
+wrong `MEDIA_ROOT` finds nothing and fails loudly, while a wrong `ARCHIVE_ROOT`
+accepts real data onto the overlay and reports success. `mkvlib.archive_root()`
+refuses to proceed unless the variable is set, the directory already exists, its
+`st_dev` differs from `/`, and it is writable. It never creates the root — a
+`mkdir` would itself succeed on the overlay and look exactly like the correct
+outcome.
+
+Its value is carried in a sops-encrypted Secret rather than written into
+`deployment.yaml`. The Kubernetes repository is public, and the standing rule
+there is to name dataset roots only and never enumerate what sits beneath them —
+the set of category names is itself the thing worth not publishing.
+
+**The archive dataset needs its own line in `/etc/exports` on the NAS.** It is a
+ZFS dataset, so it is a filesystem of its own, and the kernel NFS server does not
+serve a child filesystem through its parent's export. An unexported child is not
+an error the client can see: it shows through the parent export as an empty,
+`root:root 0755` directory sitting on the right device, which is exactly what the
+archive root looked like from inside the pod before the export was added. Every
+other child dataset there already has its own stanza, so this is the established
+pattern
+rather than a new requirement. No matching change is needed on the pod side: the
+dataset root is already mounted and NFSv4 reaches an exported child through it,
+so adding a volume for the archive would publish its name for nothing.
+
+Note that a mount-point test would *not* catch the stub: the child exports that
+do work are not mount points on the client either — they report the same `st_dev`
+as their parent and `os.path.ismount()` is false for them. Writability is what
+separates the real dataset from the stub, so that is what is checked.
+
+Three consequences:
+
+1. **Archive paths drop the share and keep the category.** A file at
+   `<box>/<category>/X/Y.mkv` archives to `<ARCHIVE_ROOT>/<category>/X/Y.mkv`.
+   A category lives on exactly one box, so the box name carries nothing the
+   archive needs, and omitting it means moving a category between boxes does not
+   fork its archive into two trees. The share is taken as `MEDIA_ROOT`'s
+   immediate child, not from `share_root()`: whether a category is its own
+   client-side mount depends on how the NAS exports it, and that must not decide
+   where a file lands.
+2. **Crossing a filesystem boundary is now the normal case, not a fault.** The
+   old code refused it outright, which was right when a cross-device move could
+   only mean the overlay. `mkv-archive` now renames when it can and otherwise
+   copies to a `.partial` name, fsyncs, size-checks, renames into place, and
+   unlinks the source last — so the file exists whole in at least one location
+   at every instant, and an interrupted copy can never be mistaken for a
+   finished one.
+3. **Free space is checked before a batch runs.** A rename consumed nothing; a
+   copy can fill the destination halfway through. `mkv-archive` sums the bytes
+   that will actually be copied and refuses the batch if they do not fit.
+
+`share_root()` survives for one job: bounding the upward `rmdir` sweep that
+removes directories the archive emptied, so it can never climb out of the share.
 
 `securityContext: runAsUser 3000, runAsGroup 100, fsGroup 100` (M5).
 
-### 4.2.1 Ownership and mode
+### 4.2.2 Ownership and mode
 
 `runAsGroup: 100` alone does not decide what lands on disk. Two separate things do:
 
@@ -307,8 +375,8 @@ interior boundary per track is eyeballed before that track is split.** Of the
 tracks a reviewer actually checked, roughly a third had a wrong anchor.
 
 **Two decisions remain open** and are not technical: whether to restructure
-`Maken-ki!` out of its release-group folders, and whether Haruhi adopts
-the discs' 28-episode season or the library's 2006/2009 split.
+`Maken-ki!` out of its release-group folders, and whether Haruhi adopts the
+discs' 28-episode season or the library's 2006/2009 split.
 
 **Disk space policy is unresolved** and is the one genuinely destructive choice:
 6.4 TiB free against ~5 TiB of split output. Archive the Play-Alls (~1.4 TiB

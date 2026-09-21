@@ -17,6 +17,12 @@ import subprocess
 
 MEDIA_ROOT = os.environ.get("MEDIA_ROOT", "/mnt/media")
 
+# Where superseded files go, as one tree rather than a sibling of each share.
+# Deliberately has NO default, unlike MEDIA_ROOT: guessing MEDIA_ROOT wrong finds
+# nothing and fails loudly, while guessing this wrong writes real data onto the
+# pod's overlay and reports success. Missing config must be a hard stop.
+ARCHIVE_ROOT = os.environ.get("ARCHIVE_ROOT")
+
 # Group-writability for `users` is the library convention. The NFS export supplies
 # the GROUP (anongid=100); the MODE comes from the creating process, and the
 # container default umask of 022 yields 644 files and 755 dirs -- no group write,
@@ -35,6 +41,49 @@ MEDIA_ROOT = os.environ.get("MEDIA_ROOT", "/mnt/media")
 os.umask(0o007)
 
 
+def archive_root():
+    """The configured archive root, checked to be real storage before it is used.
+
+    The archive is reached by configuration now, not by construction from the
+    file's own path, and configuration can be absent or wrong. Both failures land
+    on the pod's overlay, which accepts the write, reports success, and discards
+    it at the next image roll. `/mnt/media` and `/` report the same st_dev, so
+    comparing against `/` catches the overlay exactly.
+
+    It never creates the root. A mkdir would itself succeed on the overlay and
+    produce precisely the state this is meant to detect.
+    """
+    if not ARCHIVE_ROOT:
+        raise SystemExit(
+            "FATAL: ARCHIVE_ROOT is not set. It has no default on purpose -- a "
+            "guessed archive path lands on the pod's overlay and is lost at the "
+            "next redeploy. Set it in apps/mediaops/deployment.yaml.")
+    root = os.path.abspath(ARCHIVE_ROOT)
+    if not os.path.isdir(root):
+        raise SystemExit(
+            f"FATAL: ARCHIVE_ROOT does not exist: {root}\n"
+            "Create it on the NAS. Creating it from the pod would succeed on the "
+            "overlay and look correct.")
+    if os.stat(root).st_dev == os.stat("/").st_dev:
+        raise SystemExit(
+            f"FATAL: ARCHIVE_ROOT is on the pod's root filesystem: {root}\n"
+            "That is the ephemeral overlay -- the mount is missing. Anything "
+            "written there is discarded at the next redeploy.")
+    # An unexported child dataset is the other way this goes wrong, and it does
+    # not announce itself: the NAS serves the parent's empty mountpoint stub, so
+    # the path exists, sits on the right device, and is simply the wrong
+    # directory -- root-owned, and the one thing it is not is writable. Testing
+    # for a mount point would not catch it; the child exports that DO work are
+    # not mount points on the client either.
+    if not os.access(root, os.W_OK | os.X_OK):
+        raise SystemExit(
+            f"FATAL: ARCHIVE_ROOT is not writable: {root}\n"
+            "If it is a child dataset on the NAS, check it is listed in "
+            "/etc/exports -- an unexported child shows through the parent "
+            "export as an empty, root-owned directory.")
+    return root
+
+
 def share_root(path):
     """The share `path` actually lives on: its nearest enclosing mount point.
 
@@ -47,6 +96,10 @@ def share_root(path):
 
     Resolving the share from the file itself keeps working whether MEDIA_ROOT is
     one mount or twenty, and needs no list of share names.
+
+    The archive no longer uses this -- it is one configured tree, see
+    archive_root(). What remains is bounding the upward rmdir sweep that clears
+    directories an archive move emptied, so it can never climb out of the share.
     """
     p = os.path.abspath(path)
     if not os.path.isdir(p):

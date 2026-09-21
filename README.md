@@ -21,10 +21,22 @@ kubectl -n mediaops exec -it deploy/mediaops -- bash
 ```
 
 Manifest paths stay `MEDIA_ROOT`-relative (`dxp6800/anime/…`), but `/mnt/media`
-is a plain directory with one mount per NAS beneath it — **not** a share. Anything
-that needs a sibling path (`_archive/`, scratch space) must resolve the share from
-the file with `mkvlib.share_root()`; a path built on `MEDIA_ROOT` lands on the
-pod's overlay and is destroyed by the next redeploy.
+is a plain directory with one mount per NAS beneath it — **not** a share. Never
+synthesize a sibling path from `MEDIA_ROOT`: it lands on the pod's overlay and is
+destroyed by the next redeploy. Scratch space resolves the share from the file
+with `mkvlib.share_root()`; the archive is a configured tree, not a sibling.
+
+The archive is **one tree, on the box that is not being worked**, set by
+`ARCHIVE_ROOT`. It has no default — `mkvlib.archive_root()` refuses to run unless
+it is set, exists, sits on a different device than `/`, and is writable. The value
+comes from a sops-encrypted Secret, not from the deployment manifest: that repo is
+public, and dataset names are not published there.
+
+A file archives to the archive root plus its path *within its share*, so
+`<box>/<category>/X/Y.mkv` becomes `<ARCHIVE_ROOT>/<category>/X/Y.mkv`. The box
+name is dropped because a category lives on exactly one box. The working
+categories and the archive sit on different NAS permanently, so an archive move
+is normally a cross-filesystem copy rather than a rename.
 
 The pod runs as **uid 3000, gid 100**, matching every file already on the share.
 No process in it is ever root, so a root-owned media file is not merely avoided
@@ -38,7 +50,7 @@ by convention — it is unrepresentable.
 | `mkv-bounds FILE EP_MINUTES` | find episode boundaries in a Play-All track |
 | `mkv-frames FILE OUT.png T...` | timestamped frames tiled into one contact sheet |
 | `mkv-split FILE PREFIX CH,CH` | split on chapter numbers, then verify the result |
-| `mkv-archive MANIFEST.json` | move superseded library files into `_archive/` **on their own share** |
+| `mkv-archive MANIFEST.json` | move superseded library files into `$ARCHIVE_ROOT/`, layout preserved |
 | `mkv-promote MANIFEST.json` | move verified files into the library, with accounting |
 | `mkv-order INVENTORY.jsonl SERIES` | prove a disc's track order IS episode order, from its Play-All |
 | `mkv-anilist "<search>"` | episode counts and titles from AniList |

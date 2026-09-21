@@ -2,32 +2,93 @@
 """Archive superseded library files before a promotion.
 
 usage: mkv-archive MANIFEST.json [--go]
-manifest: [{"path": "anime/Series/Movies/foo.mkv"}, ...]  (relative to MEDIA_ROOT)
+manifest: [{"path": "dxp6800/<category>/Series/Movies/foo.mkv"}, ...]  (relative to MEDIA_ROOT)
 
-Moves each path to <share>/_archive/<path relative to that share>, preserving the
-layout it had. The archive is a frozen snapshot: nothing is renamed or
-restructured, so a file can always be put back exactly where it came from.
+Moves each path to $ARCHIVE_ROOT/<path within its share>, preserving the layout
+it had. The archive is a frozen snapshot: nothing is renamed or restructured, so
+a file can always be put back exactly where it came from.
 
-The archive lives on the SAME share as the file, resolved from the file itself.
-MEDIA_ROOT is no longer a mount -- it is a directory with one mount per NAS
-beneath it -- so a single MEDIA_ROOT/_archive would sit on the pod's ephemeral
-overlay and be lost at the next redeploy.
+The archive is ONE tree, on a different NAS than the working categories, so the
+bulk of it stops consuming space on the box that is actually being read. The
+share name is dropped, because a category lives on exactly one box and the
+archive mirrors the library's own shape rather than the storage topology.
+
+ARCHIVE_ROOT must be set and must resolve to real storage; mkvlib.archive_root()
+refuses the pod's ephemeral overlay, where a write succeeds, reports success, and
+is discarded at the next redeploy.
 
 This is how "replace" is done without ever deleting: archive the old, then
 promote the new. Nothing here removes data.
 """
+import errno
 import json
 import os
 import shutil
 import sys
 
-from mkvlib import MEDIA_ROOT, share_root
+from mkvlib import MEDIA_ROOT, archive_root, share_root
 
 
-def archive_dst(src):
-    """Archive path for `src`, on the same share, mirroring its layout."""
-    share = share_root(src)
-    return os.path.join(share, "_archive", os.path.relpath(src, share))
+def archive_dst(src, root):
+    """Archive path for `src`: its path within its share, rooted at the archive.
+
+    The leading share component is dropped, so a file at <box>/<category>/X/Y.mkv
+    archives to <ARCHIVE_ROOT>/<category>/X/Y.mkv. A category lives on exactly one
+    box, so the box name carries no information the archive needs -- and leaving
+    it out means moving a category between boxes does not fork its archive into
+    two trees.
+
+    The share is taken as MEDIA_ROOT's immediate child rather than from
+    share_root(), deliberately. share_root() answers a mount question, and
+    whether a given category is its own client-side mount depends on how the NAS
+    exports it; that must not decide where a file lands. Splitting the
+    MEDIA_ROOT-relative path is the same answer every time.
+
+    Two boxes could in principle both hold the same category and collide here.
+    They do not today, and main() checks every destination before it moves
+    anything, so the failure is a refusal rather than an overwrite.
+    """
+    rel = os.path.relpath(src, MEDIA_ROOT)
+    if rel.startswith(os.pardir):
+        sys.exit(f"FATAL: outside MEDIA_ROOT, no archive path: {src}")
+    parts = rel.split(os.sep)
+    if len(parts) < 2:
+        sys.exit(f"FATAL: no share component in path: {rel}")
+    return os.path.join(root, *parts[1:])
+
+
+def move(src, dst):
+    """Move `src` to `dst`: a rename where possible, a safe copy where not.
+
+    Crossing a filesystem is the normal case now that the archive lives on a
+    different NAS than most of the library, and shutil.move would degrade
+    silently into copy-and-delete. An interrupted copy must never be mistakable
+    for a finished one, so the copy lands on a temporary name, is flushed and
+    size-checked, and only then renamed into place -- the source is unlinked
+    last, leaving the file whole in at least one location at every instant.
+    """
+    try:
+        os.rename(src, dst)
+        return
+    except OSError as e:
+        if e.errno != errno.EXDEV:
+            raise
+
+    tmp = dst + ".partial"
+    try:
+        with open(src, "rb") as fsrc, open(tmp, "wb") as fdst:
+            shutil.copyfileobj(fsrc, fdst, 4 << 20)
+            fdst.flush()
+            os.fsync(fdst.fileno())
+        shutil.copystat(src, tmp)
+        if os.path.getsize(tmp) != os.path.getsize(src):
+            raise OSError(f"short copy: {src} -> {tmp}")
+        os.rename(tmp, dst)
+    except BaseException:
+        if os.path.exists(tmp):
+            os.unlink(tmp)
+        raise
+    os.unlink(src)
 
 
 def display(path):
@@ -40,17 +101,6 @@ def display(path):
     return path if rel.startswith(os.pardir) else rel
 
 
-def existing_ancestor(path):
-    """Nearest ancestor of `path` that exists -- what a move would land beside."""
-    p = os.path.abspath(path)
-    while not os.path.exists(p):
-        parent = os.path.dirname(p)
-        if parent == p:
-            return p
-        p = parent
-    return p
-
-
 def main():
     if len(sys.argv) < 2:
         sys.exit(__doc__.strip())
@@ -58,23 +108,17 @@ def main():
     with open(sys.argv[1]) as fh:
         entries = json.load(fh)
 
+    root = archive_root()
+
     moves = []
     for e in entries:
         rel = e["path"]
         src = os.path.join(MEDIA_ROOT, rel)
         if not os.path.isfile(src):
             sys.exit(f"FATAL: not a file: {src}")
-        dst = archive_dst(src)
+        dst = archive_dst(src, root)
         if os.path.exists(dst):
             sys.exit(f"FATAL: archive destination occupied: {dst}")
-        # A cross-device move is a copy+delete, not a rename. It is also the
-        # signature of the archive resolving off the share -- onto the pod's
-        # overlay, where the file survives only until the next redeploy. Refuse.
-        if os.stat(existing_ancestor(dst)).st_dev != os.stat(src).st_dev:
-            sys.exit(f"FATAL: archive destination is on a different filesystem "
-                     f"than the source; refusing to move.\n"
-                     f"  src: {src}\n  dst: {dst}\n"
-                     f"  share resolved as: {share_root(src)}")
         moves.append((src, dst))
 
     dsts = [d for _s, d in moves]
@@ -82,7 +126,18 @@ def main():
         sys.exit("FATAL: archive destination collision")
 
     sizes = {s: os.path.getsize(s) for s, _d in moves}
-    print(f"{len(moves)} files, {sum(sizes.values())/2**30:.2f} GiB")
+    # Only a cross-device move consumes space; a rename is free. Checking up
+    # front turns "the destination filled up on file 40 of 60" into a refusal.
+    root_dev = os.stat(root).st_dev
+    copied = sum(sz for s, sz in sizes.items() if os.stat(s).st_dev != root_dev)
+    if copied:
+        free = shutil.disk_usage(root).free
+        if copied > free:
+            sys.exit(f"FATAL: {copied/2**30:.2f} GiB to copy into {root}, "
+                     f"{free/2**30:.2f} GiB free")
+
+    print(f"{len(moves)} files, {sum(sizes.values())/2**30:.2f} GiB "
+          f"({copied/2**30:.2f} GiB copied across filesystems)")
     for s, d in moves:
         print(f"  {display(s)}\n    -> {display(d)}")
 
@@ -92,7 +147,7 @@ def main():
 
     for s, d in moves:
         os.makedirs(os.path.dirname(d), exist_ok=True)
-        shutil.move(s, d)
+        move(s, d)
 
     moved = 0
     for s, d in moves:
