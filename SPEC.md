@@ -167,7 +167,7 @@ One mount **per NAS**, all beneath `/mnt/media`:
 |---|---|
 | `/mnt/media/dxp6800` | `192.168.1.2:/mnt/primary/videos` |
 | `/mnt/media/dxp4800` | `192.168.1.3:/mnt/primary/videos` |
-| `/mnt/asustor` | `192.168.1.5:/volume1/data` |
+| `/mnt/media/asustor` | `192.168.1.5:/volume1/data` |
 
 **Every entry is a dataset ROOT, and never a child dataset beneath one.** That is
 a privacy rule before it is a technical one, and it matches
