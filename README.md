@@ -136,7 +136,7 @@ mkv-rip plan.json                # prints a run id; the rip survives a dropped e
 mkv-rip status <run-id>          # per-disc state and progress
 mkv-rip wait <run-id>            # blocks; exits 0 only if every disc is done
 mkv-rip list                     # every run; a new run is refused while one is running
-mkv-rip finalize <run-id>        # re-verify a finished run's failed discs still in their drives
+mkv-rip finalize <run-id>        # (refused while a run runs; a new run is refused while this runs) re-verify a finished run's failed discs still in their drives
 ```
 
 Rips land in `$MEDIA_ROOT/dxp6800/_pending/` as `<dest>.partial/` and are renamed into
@@ -151,7 +151,10 @@ disc are still there. The plan format and the full rules
 are in [`SPEC.md` §10](SPEC.md#10-disc-ripping-mkv-drives-and-mkv-rip).
 
 The licence key arrives as `$MAKEMKV_KEY` and is written to `$HOME/.MakeMKV/` on the
-`/work` emptyDir. It never touches the NAS.
+`/work` emptyDir. It never touches the NAS. Run state is the opposite: it lives on the
+NAS at `_pending/.rips/<run-id>/` (state, plan, controller log, per-disc rip and info logs),
+so a pod roll cannot lose the record of what was ripped. `mkv-rip` refuses to run if the
+staging tree is not a real mount.
 
 ## The one thing to remember
 

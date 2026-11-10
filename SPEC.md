@@ -533,9 +533,16 @@ holding media, so it is opt-in.
 `mkv-rip plan.json` refuses to start while another run is `running` (it names that run),
 then validates the plan, writes the key settings, and starts a
 controller detached in its own session (`setsid(2)`), so a dropped `kubectl exec`
-does not kill a rip. State lives in `/work/rips/<run-id>/`: `state.json`,
-`plan.json`, `controller.log`, and a raw `disc-NN.log` of makemkvcon output per
-disc. `status` prints the state; `wait` blocks until the run is `complete` or
+does not kill a rip. State lives on the NAS in `$MEDIA_ROOT/dxp6800/_pending/.rips/<run-id>/` (override:
+`$MKV_RIP_STATE`, for the selftest): `state.json`, `plan.json`, `controller.log`, a raw
+`disc-NN.log` of makemkvcon output per disc and its `disc-NN.info.log`. It is not on the
+`/work` emptyDir because a pod roll (any image push) would discard the only record of
+which discs were ripped and how they failed. Every command applies the same
+overlay guard as staging and refuses to run when the tree is not a mount; files are
+written group-writable (umask 0007, state at 0660). The MakeMKV settings and data dir
+stay under `$HOME` (`/work`): a licence and a cache, not run state. Disc-identification
+scratch (what the makemkv skill writes while working out which disc is in which bay)
+belongs in `_pending/.rips/discinfo/`, for the same reason. `status` prints the state; `wait` blocks until the run is `complete` or
 `incomplete` and exits 0 only for `complete`. If the controller dies without a
 verdict (pod restart), `status` reports the run `incomplete` rather than `running`
 forever.
@@ -545,7 +552,7 @@ dest, state, reason, progress: {phase, current, total}, titles_done, titles_tota
 errors}], health: {dmesg_available, paused, pause_reason}}`, where `reason` is a
 sentence for every blocked, failed and suspect disc. `mkv-rip list` prints every run
 as `{run_id, state, started_at}`. The validated plan is copied to
-`/work/rips/<run-id>/plan.json`, so the caller's path stops mattering. A planned
+`<run-id>/plan.json` in that directory, so the caller's path stops mattering. A planned
 serial missing from sysfs is `blocked` with a reason saying the drive has fallen off
 the bus and needs the hub reset.
 
@@ -615,7 +622,10 @@ automatically.
 
 **`mkv-rip finalize <run-id> [--dry-run]`** re-verifies a finished run's `failed`
 discs, for a run that failed verification wrongly (as the pre-pass bug did) or whose
-rip is good but was never promoted. It refuses while any run is `running`. A disc
+rip is good but was never promoted. It refuses while any run is `running`, naming it.
+It holds `.rips/finalize.lock` (containing the run id) for its whole life, and
+`mkv-rip PLAN.json` refuses to start while that lock is held, naming the run being
+finalized; a second `finalize` is refused the same way. A crash releases the lock. A disc
 qualifies when its `.partial` and `disc-NN.log` still exist, its drive (matched by
 serial) holds media and links at 480 Mbit/s, and its rip finished cleanly. One disc at
 a time, with `spinup_gap_seconds` between drives, it runs the info pass, rebuilds the
