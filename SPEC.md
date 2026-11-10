@@ -554,9 +554,27 @@ media, its link is not 480 Mbit/s, or its destination (or a `.partial` of it)
 already exists. It is checked when the run starts and again just before each disc
 spins up. Nothing is ever overwritten.
 
+**Title info pre-pass.** `makemkvcon ... mkv` prints no `TINFO` lines at all: it
+announces only `MSG:3307 "File 00009.mpls was added as title #0"`, plus progress. A
+parser fed only that run has no title table, so there are no lengths or output names to
+verify files against (every rip once failed as "not a title makemkvcon reported", good
+or not). So, while the disc holds the scanning slot, each disc is first read with
+`makemkvcon -r --noscan --minlength=<s> info dev:/dev/srN`, logged to `disc-NN.info.log`,
+and that table (`TINFO` 9 length, 16 source playlist, 27 output name; `CINFO` label) is
+what the rip is checked against. The slot and `scan_timeout_seconds` cover both
+commands. If the info pass exits non-zero, reports a fatal message or read errors, or
+lists no titles, the disc fails without being ripped (hours of copying that cannot be
+verified are not worth starting). After the rip, every title id it announced via
+`MSG:3307` must name the same source playlist in the table; title ids are positions in
+a list each invocation builds on its own, so a disagreement (a different disc, a
+changed playlist set) would verify files against the wrong lengths, and fails the disc
+with a sentence naming the title and both playlists.
+
 **Rips** run `makemkvcon -r --noscan --progress=-same --minlength=<s> mkv
 dev:/dev/srN all <dest>.partial`. `--noscan` stops makemkvcon from touching every
-other drive during its startup drive scan, which would defeat the stagger.
+other drive during its startup drive scan, which would defeat the stagger. The
+command's exit status is stored on the disc record as `makemkv_rc`, so a later
+re-verification has it.
 
 **Staggering.** A start needs all of: fewer than `max_concurrent` rips running;
 no drive in `scanning`; `spinup_gap_seconds` since the previous drive left
@@ -578,7 +596,8 @@ when it is not. Any event pauses new starts for `health_pause_seconds` (120). An
 event on a port that is, or is an ancestor of, a running drive's port marks that
 disc `suspect`.
 
-**Success** needs all of: makemkvcon exits 0; no read/write-error MSG lines (those
+**Success** needs all of: makemkvcon exits 0 and the title info pass agrees with it
+(above); no read/write-error MSG lines (those
 whose format is `Error '%1' occurred while ...`, a SCSI error, `Failed to save
 title`, or corrupt-source and hash-check messages); no failed titles in
 makemkvcon's own tally; at least one `.mkv`; every file mapped to a reported title
@@ -594,6 +613,22 @@ failure is recorded on the disc but does not fail a verified rip.
 manifest, for a human to judge — a USB reset mid-rip is not something to promote
 automatically.
 
+**`mkv-rip finalize <run-id> [--dry-run]`** re-verifies a finished run's `failed`
+discs, for a run that failed verification wrongly (as the pre-pass bug did) or whose
+rip is good but was never promoted. It refuses while any run is `running`. A disc
+qualifies when its `.partial` and `disc-NN.log` still exist, its drive (matched by
+serial) holds media and links at 480 Mbit/s, and its rip finished cleanly. One disc at
+a time, with `spinup_gap_seconds` between drives, it runs the info pass, rebuilds the
+parser from the saved `disc-NN.log` plus the new info log, and runs the same
+verification as a normal finish with the stored `makemkv_rc`. A passing disc then takes
+exactly the normal tail: segment titles, manifest, rename out of `.partial`, eject,
+`done`; both paths call one function (`finish_disc`). Suspect discs stay `suspect`, and
+a destination collision still fails. Runs from before the pre-pass stored no
+`makemkv_rc`: it is taken as 0 only when the log's last `MSG:5005` copy-complete line
+reports no failed titles and no fatal message appears, else the disc is skipped as still
+failed. The run state is recomputed at the end; `--dry-run` prints which discs would be
+processed and why the rest are skipped, touching nothing.
+
 **Titles.** Segment titles follow anime-normalize, so a ripped disc needs no
 retitling there: every title on a series disc (episodes and extras) gets the
 canonical series name, and a movie gets `<Title (Year)>`. This is the container
@@ -608,4 +643,8 @@ The run is `complete` only when every disc is `done`; otherwise `incomplete`, wi
 a `problems` list of the discs that are not.
 
 `mkv-rip --selftest` runs fixtures for the robot parser, the destination and title
-formats, the verifier, the health attribution and the start gate, with no hardware.
+formats, the verifier, the health attribution and the start gate, with no hardware. The
+title-info fixtures are trimmed from a real disc: an `mkv` log and an `info` log with a
+matching and a mismatched playlist, the legacy exit-status inference, `finalize`
+refusing while a run runs, its plan, and an end-to-end `finalize` against a fake
+`makemkvcon`.

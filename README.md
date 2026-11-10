@@ -59,7 +59,7 @@ by convention — it is unrepresentable.
 | `mkv-titlescan FILE OUT START END [STEP] [BAND]` | hunt for an episode title card |
 | `mkv-staticcheck FILE...` | is this a real extra, or a disc menu / logo card? |
 | `mkv-drives [--labels]` | one JSON line per optical drive: serial, USB port, link speed, tray/media |
-| `mkv-rip PLAN.json` / `status ID` / `wait ID` | staggered disc ripping into `_pending`, verified, with a manifest |
+| `mkv-rip PLAN.json` / `status ID` / `wait ID` / `finalize ID` | staggered disc ripping into `_pending`, verified, with a manifest; `finalize` re-verifies failed discs |
 
 Every mutating tool is **dry-run by default** and needs `--go` to act. The exception is
 `mkv-rip`, which only ever writes new `.partial` directories and refuses to touch an
@@ -136,12 +136,18 @@ mkv-rip plan.json                # prints a run id; the rip survives a dropped e
 mkv-rip status <run-id>          # per-disc state and progress
 mkv-rip wait <run-id>            # blocks; exits 0 only if every disc is done
 mkv-rip list                     # every run; a new run is refused while one is running
+mkv-rip finalize <run-id>        # re-verify a finished run's failed discs still in their drives
 ```
 
 Rips land in `$MEDIA_ROOT/dxp6800/_pending/` as `<dest>.partial/` and are renamed into
 place only after the run passes: makemkvcon exit 0, no read errors, every file's
 duration within 2% of what MakeMKV reported. A `manifest.json` records every title, so
-classification can read it instead of re-probing. The plan format and the full rules
+classification can read it instead of re-probing. Each disc is first read with
+`makemkvcon info` (its scanning slot covers both commands), because `mkv` mode prints no
+title table and there would be nothing to check the files against; if that table and
+the rip disagree about which playlist a title is, the disc fails. `mkv-rip finalize`
+re-runs that check and the promotion for a run's `failed` discs whose `.partial` and
+disc are still there. The plan format and the full rules
 are in [`SPEC.md` §10](SPEC.md#10-disc-ripping-mkv-drives-and-mkv-rip).
 
 The licence key arrives as `$MAKEMKV_KEY` and is written to `$HOME/.MakeMKV/` on the
