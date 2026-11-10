@@ -1,0 +1,938 @@
+#!/usr/bin/env python3
+"""Rip discs into _pending, a few at a time, without knocking drives off the bus.
+
+usage: mkv-rip PLAN.json            start a run detached; prints its run id
+       mkv-rip status RUN_ID        JSON: per-disc state, progress, errors
+       mkv-rip wait RUN_ID          block until the run is terminal
+       mkv-rip --selftest           parser / scheduler / verifier fixtures
+
+plan: {"discs": [{"serial": "BP52...", "category": "anime", "series": "Name",
+                  "season": 1, "disc": 2},
+                 {"serial": "BP52...", "category": "movies", "title": "Name (Year)"}],
+       "min_title_seconds": 60, "max_concurrent": 3, "spinup_gap_seconds": 30,
+       "health_pause_seconds": 120, "scan_timeout_seconds": 900}   # all optional
+
+Destinations, under $MEDIA_ROOT/dxp6800/_pending/:
+  anime, tv   <category>/<Series>/Season XX/Disc XX/
+  hentai      the same, with `season: null` dropping the Season level
+  movies      movies/<Title (Year)>/
+
+Why this is a controller and not a loop around makemkvcon: the drives share one
+powered USB 2.0 hub tree, and spinning several up together has knocked drives
+off the bus. There is no power sensor to ask, so starts are gated in software --
+one drive scanning at a time, a gap after it begins copying, and a pause when
+the USB tree reports errors. Nothing is ever overwritten: a destination that
+already exists blocks that disc.
+
+Disc states: pending, blocked, scanning, ripping, done, failed, suspect.
+`suspect` means the rip finished but the USB tree misbehaved under that drive;
+it is kept as .partial for a human to judge, never promoted automatically.
+A run is `complete` only when every disc is `done`; otherwise `incomplete`.
+"""
+import collections
+import datetime
+import json
+import os
+import re
+import secrets
+import signal
+import subprocess
+import sys
+import tempfile
+import threading
+import time
+
+from mkvlib import MEDIA_ROOT, duration
+import mkvdev
+
+RUNS_ROOT = os.environ.get("MKV_RIP_RUNS", "/work/rips")
+STAGING = os.path.join(MEDIA_ROOT, "dxp6800", "_pending")
+
+CATEGORIES = ("anime", "tv", "hentai", "movies")
+SERIES_CATEGORIES = ("anime", "tv", "hentai")
+DEFAULTS = {"min_title_seconds": 60, "max_concurrent": 3, "spinup_gap_seconds": 30,
+            "health_pause_seconds": 120, "scan_timeout_seconds": 900}
+DISC_KEYS = {"serial", "category", "series", "season", "disc", "title"}
+
+TERMINAL_DISC = ("done", "failed", "blocked", "suspect")
+TERMINAL_RUN = ("complete", "incomplete")
+ACTIVE = ("scanning", "ripping")
+
+# The scanning -> copying transition is read from makemkvcon's progress titles.
+# A `mkv ... all` run walks: PRGT "Opening Blu-ray disc"/"Opening DVD disc" (spin
+# up, then PRGCs such as "Scanning contents", "Processing AV clips", "Processing
+# BD+ code", "Loading playlists" -- the disc analysis), then PRGT "Saving all
+# titles to MKV files" / "Saving %1 titles into directory %2", whose PRGCs are
+# "Analyzing seamless segments" and then "Saving to MKV file".
+# The gate keys on the PRGC "Saving to MKV file" *under* a "Saving..." PRGT.
+# "Analyzing seamless segments" is deliberately NOT copying: it is still
+# analysis, seeking around the playlists, and the drive is not yet streaming.
+# Names, not the numeric codes, because the codes are internal ids that have
+# moved between releases while the English progress text has not.
+SAVE_PRGT_PREFIX = "Saving"
+COPY_PRGC = "Saving to MKV file"
+
+# MSG lines that mean data was not read or written faithfully. Matched against
+# the message's format string ("Error '%1' occurred while reading '%2' at offset
+# '%3'"), which is stable where the formatted text is not. A rip with any of
+# these is not trusted, even if makemkvcon went on to exit 0.
+BAD_MSG_RE = re.compile(
+    r"occurred while|Scsi error|Failed to save title|corrupt or invalid|"
+    r"Hash check failed|Too many hash check errors", re.I)
+# Fatal for the whole run, not one title: the licence, or the disc not opening.
+FATAL_MSG_CODES = {5009, 5010, 5020, 5021}
+
+# Tolerance between MakeMKV's reported title length and ffprobe's. Reported
+# lengths are whole seconds, so very short titles get a two-second floor.
+DURATION_TOLERANCE = 0.02
+DURATION_FLOOR_SECONDS = 2.0
+
+# Kernel lines that mean the USB tree is struggling. Matched only when they name
+# a port, so unrelated USB devices elsewhere on the host do not pause a rip.
+HEALTH_RE = re.compile(
+    r"error -71|USB disconnect|\bdisconnect|reset (?:full|high|low|super)[- ]?speed|"
+    r"device descriptor read|unable to enumerate|device not accepting address|"
+    r"over-?current|cannot enable|new full-speed", re.I)
+
+
+def now_iso():
+    return datetime.datetime.now().astimezone().isoformat(timespec="seconds")
+
+
+def log(msg):
+    print(f"{now_iso()} {msg}", flush=True)
+
+
+# --------------------------------------------------------------------- plan
+
+def sanitize(name):
+    """Only '/' is illegal in a path component; everything else is the title."""
+    return re.sub(r"\s*/\s*", " - ", name).strip()
+
+
+def _component(value, what):
+    if not isinstance(value, str) or not sanitize(value) or sanitize(value) in (".", ".."):
+        raise ValueError(f"{what} must be a non-empty string")
+    if "\0" in value:
+        raise ValueError(f"{what} contains a NUL")
+    return sanitize(value)
+
+
+def destination(entry):
+    cat = entry["category"]
+    if cat == "movies":
+        return os.path.join(STAGING, "movies", _component(entry.get("title"), "title"))
+    parts = [STAGING, cat, _component(entry.get("series"), "series")]
+    if entry.get("season") is not None:
+        parts.append(f"Season {entry['season']:02d}")
+    parts.append(f"Disc {entry['disc']:02d}")
+    return os.path.join(*parts)
+
+
+def segment_title(entry, tnn):
+    """The MKV segment title that replaces MakeMKV's raw disc-label title.
+
+    Final episode titles (SxxEyy - Name) belong to anime-normalize: the episode
+    mapping needs its dialogue verification, which a ripper cannot do.
+    """
+    if entry["category"] == "movies":
+        return entry["title"]
+    # A hentai disc with no season has no "S" part to print.
+    season = f"S{entry['season']:02d} " if entry.get("season") is not None else ""
+    return f"{entry['series']} - {season}Disc {entry['disc']:02d} - t{tnn:02d}"
+
+
+def _int(value, what, lo, hi=None):
+    if isinstance(value, bool) or not isinstance(value, int) or value < lo or (hi and value > hi):
+        raise ValueError(f"{what} must be an integer >= {lo}" + (f" and <= {hi}" if hi else ""))
+    return value
+
+
+def validate_plan(plan):
+    """-> plan with defaults filled in. Raises ValueError with a message that
+    names the offending entry; a typo caught here costs nothing, caught after a
+    drive spins up it costs a disc's worth of time."""
+    if not isinstance(plan, dict):
+        raise ValueError("plan must be a JSON object")
+    unknown = set(plan) - set(DEFAULTS) - {"discs"}
+    if unknown:
+        raise ValueError(f"unknown plan keys: {sorted(unknown)}")
+    discs = plan.get("discs")
+    if not isinstance(discs, list) or not discs:
+        raise ValueError("plan.discs must be a non-empty list")
+
+    out = {k: _int(plan.get(k, v), k, 0 if k == "spinup_gap_seconds" else 1,
+                   16 if k == "max_concurrent" else None) for k, v in DEFAULTS.items()}
+    seen_serials, seen_dests, entries = set(), set(), []
+    for i, e in enumerate(discs):
+        who = f"discs[{i}]"
+        if not isinstance(e, dict) or set(e) - DISC_KEYS:
+            raise ValueError(f"{who}: expected an object with keys from {sorted(DISC_KEYS)}")
+        if not isinstance(e.get("serial"), str) or not e["serial"]:
+            raise ValueError(f"{who}: serial is required")
+        if e.get("category") not in CATEGORIES:
+            raise ValueError(f"{who}: category must be one of {CATEGORIES}")
+        try:
+            if e["category"] in SERIES_CATEGORIES:
+                _component(e.get("series"), "series")
+                _int(e.get("disc"), "disc", 1)
+                if e.get("season") is None:
+                    if e["category"] != "hentai":
+                        raise ValueError("season is required (only hentai may use null)")
+                else:
+                    _int(e["season"], "season", 0)
+            else:
+                _component(e.get("title"), "title")
+                extra = {"series", "season", "disc"} & set(e)
+                if extra:
+                    raise ValueError(f"{sorted(extra)} do not apply to movies")
+        except ValueError as exc:
+            raise ValueError(f"{who}: {exc}") from None
+        dest = destination(e)
+        if e["serial"] in seen_serials:
+            raise ValueError(f"{who}: serial {e['serial']} appears twice")
+        if dest in seen_dests:
+            raise ValueError(f"{who}: destination {dest} is already claimed by an earlier disc")
+        seen_serials.add(e["serial"])
+        seen_dests.add(dest)
+        entries.append(e)
+    out["discs"] = entries
+    return out
+
+
+def staging_root():
+    """The staging tree, checked to be the NAS and not the pod's overlay.
+
+    Same reasoning as mkvlib.archive_root(): if the mount is missing, a rip into
+    the overlay "succeeds" and is discarded at the next image roll. Never created.
+    """
+    if not os.path.isdir(STAGING):
+        raise SystemExit(f"FATAL: staging tree does not exist: {STAGING}\n"
+                         "Create it on the NAS; creating it from the pod would land on the overlay.")
+    if os.stat(STAGING).st_dev == os.stat("/").st_dev:
+        raise SystemExit(f"FATAL: {STAGING} is on the pod's root filesystem -- the mount is missing.")
+    if not os.access(STAGING, os.W_OK | os.X_OK):
+        raise SystemExit(f"FATAL: {STAGING} is not writable.")
+
+
+# ------------------------------------------------------------ robot parsing
+
+def hms(value):
+    """'1:23:45' -> seconds, or None."""
+    try:
+        h, m, s = (int(x) for x in value.split(":"))
+    except ValueError:
+        return None
+    return h * 3600 + m * 60 + s
+
+
+class RobotParser:
+    """Accumulates what a `makemkvcon -r mkv` run says about itself."""
+
+    def __init__(self):
+        self.titles = collections.defaultdict(dict)   # id -> {TINFO attr: value}
+        self.disc = {}                                # CINFO attr -> value
+        self.prgt = self.prgc = ""
+        self.percent = 0.0
+        self.copying = False
+        self.errors = []                              # MSG lines that void the rip
+        self.fatal = None
+        self.saved = self.failed = None
+        self.version = None
+
+    def feed(self, line):
+        kind, _, rest = line.rstrip("\r\n").partition(":")
+        if kind not in ("MSG", "PRGT", "PRGC", "PRGV", "TINFO", "CINFO"):
+            return
+        f = mkvdev.split_fields(rest)
+        try:
+            getattr(self, "_" + kind.lower())(f, line)
+        except (IndexError, ValueError):
+            pass    # a malformed line is not worth failing a rip over; the log has it raw
+
+    def _prgt(self, f, _line):
+        self.prgt = f[2]
+
+    def _prgc(self, f, _line):
+        self.prgc = f[2]
+        if self.prgt.startswith(SAVE_PRGT_PREFIX) and self.prgc == COPY_PRGC:
+            self.copying = True
+
+    def _prgv(self, f, _line):
+        cur, total, mx = int(f[0]), int(f[1]), int(f[2])
+        if mx:
+            self.percent = round(100.0 * total / mx, 1)
+
+    def _tinfo(self, f, _line):
+        self.titles[int(f[0])][int(f[1])] = f[3]
+
+    def _cinfo(self, f, _line):
+        self.disc[int(f[0])] = f[2]
+
+    def _msg(self, f, line):
+        code = int(f[0])
+        text = f[3] if len(f) > 3 else ""
+        fmt = f[4] if len(f) > 4 else text
+        if code == 1005:
+            self.version = text
+        elif code == 5005:
+            self.saved, self.failed = int(f[5]), 0
+        elif code == 5004:
+            self.saved, self.failed = int(f[5]), int(f[6])
+        if code in FATAL_MSG_CODES and not self.fatal:
+            self.fatal = text
+        if BAD_MSG_RE.search(fmt) or BAD_MSG_RE.search(text):
+            self.errors.append(line.rstrip("\r\n"))
+
+    def title_seconds(self, tid):
+        return hms(self.titles[tid].get(9, ""))
+
+
+# ------------------------------------------------------------- verification
+
+def title_for_file(parser, fname):
+    """The title id a ripped file belongs to: by its reported output name, else
+    by the _tNN suffix MakeMKV puts on every file it names."""
+    for tid, attrs in parser.titles.items():
+        if attrs.get(27) == fname:
+            return tid
+    m = re.search(r"_t(\d+)\.mkv$", fname)
+    return int(m.group(1)) if m and int(m.group(1)) in parser.titles else None
+
+
+def check_rip(rc, parser, files, min_title_seconds):
+    """-> list of reasons this rip cannot be trusted; empty means it can.
+
+    `files` maps each ripped file name to its measured seconds (None when
+    ffprobe could not read it). Pure, so the selftest can drive it.
+    """
+    bad = []
+    if rc != 0:
+        bad.append(f"makemkvcon exited {rc}")
+    if parser.fatal:
+        bad.append(f"fatal: {parser.fatal}")
+    if parser.errors:
+        bad.append(f"{len(parser.errors)} read/write error message(s) from makemkvcon")
+    if parser.failed:
+        bad.append(f"makemkvcon reports {parser.failed} title(s) failed to save")
+    if not files:
+        bad.append("no .mkv files were produced")
+
+    matched = set()
+    for fname, secs in sorted(files.items()):
+        tid = title_for_file(parser, fname)
+        if tid is None:
+            bad.append(f"{fname}: not a title makemkvcon reported, cannot verify its length")
+            continue
+        matched.add(tid)
+        want = parser.title_seconds(tid)
+        if secs is None:
+            bad.append(f"{fname}: ffprobe could not read it")
+        elif want is None:
+            bad.append(f"{fname}: makemkvcon gave no length for title {tid}")
+        elif abs(secs - want) > max(DURATION_TOLERANCE * want, DURATION_FLOOR_SECONDS):
+            bad.append(f"{fname}: {secs:.1f}s on disk vs {want}s reported")
+    for tid in sorted(set(parser.titles) - matched):
+        want = parser.title_seconds(tid)
+        if want is not None and want >= min_title_seconds and files:
+            bad.append(f"title {tid} ({want}s) was reported but no file was written for it")
+    return bad
+
+
+# ------------------------------------------------------------- health watch
+
+def parse_health_line(line):
+    """-> a USB port name this kernel line is about, or None.
+
+    Port-level lines name the child as `<hub>-port<N>`, which is the device at
+    `<hub>.<N>`; the bare root-hub form (`usb usb5`) names a whole bus.
+    """
+    if not HEALTH_RE.search(line):
+        return None
+    m = re.search(r"(\d+-\d+(?:\.\d+)*)-port(\d+)", line)
+    if m:
+        return f"{m.group(1)}.{m.group(2)}"
+    m = re.search(r"\b(?:usb|hub) (\d+-\d+(?:\.\d+)*)\b", line)
+    if m:
+        return m.group(1)
+    m = re.search(r"\busb (?:usb)?(\d+)\b", line)
+    return m.group(1) if m else None
+
+
+def port_covers(event_port, drive_port):
+    """Does an event on `event_port` touch a drive on `drive_port`? A hub or bus
+    event reaches everything beneath it: one reset on 5-1.2 hits all three
+    drives behind it."""
+    if "-" not in event_port:
+        return drive_port.split("-")[0] == event_port
+    return drive_port == event_port or drive_port.startswith(event_port + ".")
+
+
+class HealthWatch:
+    """Notices the USB tree misbehaving. sysfs first, dmesg when it is allowed.
+
+    dmesg is usually unreadable for the pod's uid (kernel.dmesg_restrict), so the
+    watch cannot depend on it. The signals sysfs does give are the ones that
+    matter here: a drive's link falling out of 480, its USB device vanishing, or
+    its sr node disappearing -- exactly how the 2026-11-09 failure looked.
+    """
+
+    def __init__(self, known):
+        self.known = {d["usb_port"]: d for d in known}
+        self.speed = {p: d["link_mbps"] for p, d in self.known.items()}
+        self.down = set()
+        self.seen_dmesg = None
+        self.dmesg = "ok"
+
+    def poll_sysfs(self):
+        events = []
+        for port, d in self.known.items():
+            sr = os.path.basename(d["dev"])
+            if not os.path.isdir(d["usb_dir"]):
+                if (port, "usb") not in self.down:
+                    self.down.add((port, "usb"))
+                    events.append({"port": port, "kind": "usb_device_gone", "detail": f"{port} left the bus"})
+                continue
+            self.down.discard((port, "usb"))
+            if not os.path.exists(os.path.join(mkvdev.SYS_BLOCK, sr)):
+                if (port, "sr") not in self.down:
+                    self.down.add((port, "sr"))
+                    events.append({"port": port, "kind": "sr_node_gone", "detail": f"{sr} disappeared"})
+            else:
+                self.down.discard((port, "sr"))
+            now = mkvdev.link_mbps(d["usb_dir"])
+            if now is not None and self.speed.get(port) and now < self.speed[port]:
+                events.append({"port": port, "kind": "link_dropped",
+                               "detail": f"{port} fell from {self.speed[port]} to {now} Mbit/s"})
+            if now is not None:
+                self.speed[port] = now
+        return events
+
+    def poll_dmesg(self):
+        r = subprocess.run(["dmesg"], capture_output=True, text=True)
+        if r.returncode != 0:
+            self.dmesg = f"unavailable: {(r.stderr or 'dmesg failed').strip()[:100]}"
+            return []
+        self.dmesg = "ok"
+        buses = {p.split("-")[0] for p in self.known}
+        current = collections.Counter(r.stdout.splitlines())
+        if self.seen_dmesg is None:          # first read is the baseline, not news
+            self.seen_dmesg = current
+            return []
+        fresh = current - self.seen_dmesg
+        self.seen_dmesg = current
+        events = []
+        for line in fresh.elements():
+            port = parse_health_line(line)
+            if port and port.split("-")[0] in buses:
+                events.append({"port": port, "kind": "dmesg", "detail": line.strip()[:200]})
+        return events
+
+
+# --------------------------------------------------------------- scheduling
+
+def may_start(now, discs, cfg, gate_open_at, paused_until):
+    """Is the controller allowed to spin up another drive right now?
+
+    Three independent brakes, all of which must be off:
+      - concurrency: at most max_concurrent rips running;
+      - scanning: only one drive in spin-up/analysis at a time, because that is
+        the phase that draws the surge;
+      - the gap: spinup_gap_seconds after the previous drive left scanning, so
+        its own copy ramp is settled before the next surge;
+      - the health pause, after any USB error.
+    """
+    running = [d for d in discs if d["state"] in ACTIVE]
+    if len(running) >= cfg["max_concurrent"]:
+        return False
+    if any(d["state"] == "scanning" for d in running):
+        return False
+    if gate_open_at is not None and now < gate_open_at:
+        return False
+    return paused_until is None or now >= paused_until
+
+
+# --------------------------------------------------------------- controller
+
+def write_json(path, obj):
+    fd, tmp = tempfile.mkstemp(dir=os.path.dirname(path), prefix=".state.")
+    with os.fdopen(fd, "w") as fh:
+        json.dump(obj, fh, indent=1)
+    os.replace(tmp, path)
+
+
+class Run:
+    def __init__(self, run_id):
+        self.id = run_id
+        self.dir = os.path.join(RUNS_ROOT, run_id)
+        with open(os.path.join(self.dir, "plan.json")) as fh:
+            self.cfg = json.load(fh)
+        self.lock = threading.RLock()
+        self.stopping = False
+        self.gate_open_at = None
+        self.paused_until = None
+        self.procs = {}
+        self.state = {
+            "run_id": run_id, "state": "running", "started": now_iso(), "finished": None,
+            "controller_pid": os.getpid(),
+            "health": {"dmesg": "pending", "paused_until": None, "events": []},
+            "discs": [{"index": i, "serial": e["serial"], "plan": e, "dest": destination(e),
+                       "state": "pending", "reason": None, "drive": None, "progress": None,
+                       "started": None, "copy_started": None, "finished": None,
+                       "suspect": [], "titles": None, "eject": None}
+                      for i, e in enumerate(self.cfg["discs"])],
+        }
+
+    @property
+    def discs(self):
+        return self.state["discs"]
+
+    def save(self):
+        with self.lock:
+            self.state["health"]["paused_until"] = (
+                datetime.datetime.fromtimestamp(self.paused_until).astimezone().isoformat(timespec="seconds")
+                if self.paused_until and self.paused_until > time.time() else None)
+            write_json(os.path.join(self.dir, "state.json"), self.state)
+
+    def set_state(self, disc, new, reason=None):
+        with self.lock:
+            old = disc["state"]
+            disc["state"] = new
+            if reason:
+                disc["reason"] = reason
+            if new in TERMINAL_DISC:
+                disc["finished"] = now_iso()
+            if old == "scanning" and new != "scanning":
+                self.gate_open_at = time.time() + self.cfg["spinup_gap_seconds"]
+            log(f"disc {disc['index']} ({disc['serial']}): {old} -> {new}" + (f" -- {reason}" if reason else ""))
+            self.save()
+
+    # ---- pre-flight
+
+    def preflight(self, disc):
+        """-> blocking reason, or None. Re-run at start: a tray can open between
+        planning and spin-up."""
+        found = {d["serial"]: d for d in mkvdev.drives()}
+        drive = found.get(disc["serial"])
+        if drive is None:
+            return f"no drive with serial {disc['serial']} (drives present: {sorted(found)})"
+        disc["drive"] = {k: drive[k] for k in ("dev", "sg", "usb_port", "link_mbps")}
+        # A drive still becoming ready reports no media for a few seconds after
+        # a disc goes in; wait it out rather than block a loaded drive.
+        for _ in range(10):
+            if drive["status"] != "not_ready":
+                break
+            time.sleep(2)
+            drive = {d["serial"]: d for d in mkvdev.drives()}.get(disc["serial"], drive)
+        if drive["status"] == "unknown":
+            return f"cannot read the drive state: {drive.get('error')}"
+        if not drive["media"]:
+            return f"no disc in the drive (tray {drive['tray']}, state {drive['status']})"
+        if drive["link_mbps"] != 480:
+            return (f"link is {drive['link_mbps']} Mbit/s, not 480: the hub tree needs the reset "
+                    "runbook, which needs root on the node")
+        if os.path.exists(disc["dest"]):
+            return f"destination already exists: {disc['dest']}"
+        if os.path.exists(disc["dest"] + ".partial"):
+            return f"a .partial from an earlier run exists: {disc['dest']}.partial"
+        return None
+
+    # ---- health
+
+    def on_health(self, events):
+        if not events:
+            return
+        with self.lock:
+            for ev in events:
+                ev["time"] = now_iso()
+                log(f"health: {ev['kind']} on {ev['port']}: {ev['detail']}")
+                self.state["health"]["events"] = (self.state["health"]["events"] + [ev])[-20:]
+                for disc in self.discs:
+                    if disc["state"] in ACTIVE and disc["drive"] and port_covers(ev["port"], disc["drive"]["usb_port"]):
+                        disc["suspect"].append(ev)
+            self.paused_until = time.time() + self.cfg["health_pause_seconds"]
+            self.save()
+
+    # ---- main loop
+
+    def start_next(self, jobs):
+        pending = [d for d in self.discs if d["state"] == "pending"]
+        if not pending or not may_start(time.time(), self.discs, self.cfg, self.gate_open_at, self.paused_until):
+            return
+        disc = pending[0]
+        reason = self.preflight(disc)
+        if reason:
+            self.set_state(disc, "blocked", reason)
+            return
+        job = Job(self, disc)
+        jobs.append(job)
+        self.set_state(disc, "scanning")
+        disc["started"] = now_iso()
+        job.start()
+
+    def stop_all(self):
+        with self.lock:
+            for proc in self.procs.values():
+                if proc.poll() is None:
+                    proc.terminate()
+
+    def main(self):
+        signal.signal(signal.SIGTERM, lambda *_: setattr(self, "stopping", True))
+        signal.signal(signal.SIGINT, lambda *_: setattr(self, "stopping", True))
+        mkvdev.write_makemkv_settings()
+
+        known = mkvdev.drives()
+        watch = HealthWatch(known)
+        watch.poll_dmesg()
+        self.state["health"]["dmesg"] = watch.dmesg
+        self.save()
+
+        for disc in self.discs:
+            reason = self.preflight(disc)
+            if reason:
+                self.set_state(disc, "blocked", reason)
+
+        jobs, last_dmesg = [], 0.0
+        while not all(d["state"] in TERMINAL_DISC for d in self.discs):
+            if self.stopping:
+                self.stop_all()
+                for d in self.discs:
+                    if d["state"] == "pending":
+                        self.set_state(d, "failed", "run was stopped before this disc started")
+                if not any(j.is_alive() for j in jobs):
+                    break
+            else:
+                events = watch.poll_sysfs()
+                if time.time() - last_dmesg >= 5:
+                    last_dmesg = time.time()
+                    events += watch.poll_dmesg()
+                    self.state["health"]["dmesg"] = watch.dmesg
+                self.on_health(events)
+                self.start_next(jobs)
+                self.timeout_scans()
+            self.save()
+            time.sleep(1)
+
+        for j in jobs:
+            j.join()
+        with self.lock:
+            done = all(d["state"] == "done" for d in self.discs)
+            self.state["state"] = "complete" if done else "incomplete"
+            self.state["finished"] = now_iso()
+            self.state["problems"] = [{"index": d["index"], "serial": d["serial"], "state": d["state"],
+                                       "reason": d["reason"]} for d in self.discs if d["state"] != "done"]
+            self.save()
+        log(f"run {self.state['state']}")
+
+    def timeout_scans(self):
+        """A disc that never leaves analysis would hold the single scanning slot
+        forever and starve the rest of the run, so it is killed instead."""
+        for d in self.discs:
+            if d["state"] == "scanning" and d["started"]:
+                started = datetime.datetime.fromisoformat(d["started"]).timestamp()
+                proc = self.procs.get(d["index"])
+                if proc and proc.poll() is None and time.time() - started > self.cfg["scan_timeout_seconds"]:
+                    d["reason"] = f"still scanning after {self.cfg['scan_timeout_seconds']}s; killed"
+                    proc.kill()
+
+
+class Job(threading.Thread):
+    """One disc: rip it, verify it, then promote it out of .partial."""
+
+    def __init__(self, run, disc):
+        super().__init__(daemon=False)
+        self.run_, self.disc = run, disc
+        self.parser = RobotParser()
+        self.partial = disc["dest"] + ".partial"
+
+    def run(self):
+        run, disc = self.run_, self.disc
+        try:
+            rc = self.rip()
+            self.finish(rc)
+        except Exception as exc:                      # noqa: BLE001 -- must not strand the slot
+            run.set_state(disc, "failed", f"internal error: {exc!r}")
+
+    def rip(self):
+        run, disc = self.run_, self.disc
+        os.makedirs(self.partial)
+        cmd = ["makemkvcon", "-r", "--noscan", "--progress=-same",
+               f"--minlength={run.cfg['min_title_seconds']}",
+               "mkv", f"dev:{disc['drive']['dev']}", "all", self.partial]
+        with open(os.path.join(run.dir, f"disc-{disc['index']:02d}.log"), "w") as raw:
+            proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                                    stdin=subprocess.DEVNULL, text=True, errors="replace")
+            with run.lock:
+                run.procs[disc["index"]] = proc
+            last_pct = -1.0
+            for line in proc.stdout:
+                raw.write(line)
+                raw.flush()
+                self.parser.feed(line)
+                p = self.parser
+                if p.copying and disc["state"] == "scanning":
+                    disc["copy_started"] = now_iso()
+                    run.set_state(disc, "ripping")
+                if abs(p.percent - last_pct) >= 0.1:
+                    last_pct = p.percent
+                    disc["progress"] = {"percent": p.percent, "phase": p.prgt, "step": p.prgc}
+            return proc.wait()
+
+    def finish(self, rc):
+        run, disc, p = self.run_, self.disc, self.parser
+        disc["progress"] = {"percent": p.percent, "phase": "verifying", "step": ""}
+        files = {}
+        for name in sorted(os.listdir(self.partial)):
+            if name.lower().endswith(".mkv"):
+                try:
+                    files[name] = duration(os.path.join(self.partial, name)) * 60
+                except ValueError:
+                    files[name] = None
+        bad = check_rip(rc, p, files, run.cfg["min_title_seconds"])
+        if disc["reason"]:                       # set by the scan watchdog before it killed us
+            bad.insert(0, disc["reason"])
+        disc["titles"] = len(files)
+        if bad:
+            run.set_state(disc, "failed", "; ".join(bad) + f" (kept at {self.partial})")
+            return
+        manifest = self.manifest(files)
+        if disc["suspect"]:
+            self.write_manifest(manifest)
+            run.set_state(disc, "suspect",
+                          f"rip verified, but the USB tree reported {len(disc['suspect'])} error(s) "
+                          f"under this drive; kept at {self.partial} for review")
+            return
+        self.set_segment_titles(manifest)
+        self.write_manifest(manifest)
+        if os.path.exists(disc["dest"]):
+            run.set_state(disc, "failed", f"destination appeared during the rip: {disc['dest']}")
+            return
+        os.rename(self.partial, disc["dest"])
+        try:
+            mkvdev.eject(disc["drive"])
+            disc["eject"] = "ok"
+        except OSError as exc:
+            disc["eject"] = f"failed: {exc}"
+        run.set_state(disc, "done")
+
+    def set_segment_titles(self, manifest):
+        for t in manifest["titles"]:
+            r = subprocess.run(["mkvpropedit", os.path.join(self.partial, t["file"]),
+                                "--edit", "info", "--set", f"title={t['segment_title']}"],
+                               capture_output=True, text=True)
+            if r.returncode >= 2:
+                raise RuntimeError(f"mkvpropedit failed on {t['file']}: {r.stdout[-200:]}")
+
+    def manifest(self, files):
+        run, disc, p = self.run_, self.disc, self.parser
+        titles = []
+        for fname, secs in sorted(files.items()):
+            tid = title_for_file(p, fname)
+            a = p.titles[tid]
+            titles.append({
+                "id": tid, "name": a.get(2), "file": fname, "chapters": a.get(8),
+                "duration_seconds": p.title_seconds(tid), "duration": a.get(9),
+                "size_bytes": int(a[11]) if a.get(11, "").isdigit() else None,
+                "source_playlist": a.get(16), "file_bytes": os.path.getsize(os.path.join(self.partial, fname)),
+                "file_seconds": round(secs, 3), "segment_title": segment_title(disc["plan"], tid)})
+        return {"plan": disc["plan"], "drive": disc["drive"], "makemkv": p.version,
+                "disc_label": p.disc.get(32) or p.disc.get(2), "titles": titles,
+                "errors": p.errors, "suspect_events": disc["suspect"],
+                "started": disc["started"], "copy_started": disc["copy_started"], "finished": now_iso()}
+
+    def write_manifest(self, manifest):
+        write_json(os.path.join(self.partial, "manifest.json"), manifest)
+
+
+# ---------------------------------------------------------------------- CLI
+
+def run_dir(run_id):
+    if not re.fullmatch(r"[0-9A-Za-z-]+", run_id):
+        raise SystemExit(f"FATAL: bad run id: {run_id!r}")
+    d = os.path.join(RUNS_ROOT, run_id)
+    if not os.path.isfile(os.path.join(d, "state.json")):
+        raise SystemExit(f"FATAL: no such run: {run_id}")
+    return d
+
+
+def pid_alive(pid):
+    try:
+        with open(f"/proc/{pid}/cmdline", "rb") as fh:
+            return b"mkv-rip" in fh.read()
+    except OSError:
+        return False
+
+
+def load_status(run_id):
+    with open(os.path.join(run_dir(run_id), "state.json")) as fh:
+        st = json.load(fh)
+    pid = st.get("controller_pid")
+    alive = True if pid is None else pid_alive(pid)    # None: the controller is still being spawned
+    st["controller_alive"] = alive
+    if st["state"] not in TERMINAL_RUN and not alive:
+        # The controller died without writing a verdict (pod restart, kill -9).
+        # Saying "running" forever would hang every `wait`.
+        st["state"] = "incomplete"
+        st["problems"] = [{"index": d["index"], "serial": d["serial"], "state": d["state"],
+                           "reason": d["reason"] or "controller died before this disc finished"}
+                          for d in st["discs"] if d["state"] != "done"]
+    return st
+
+
+def cmd_start(plan_path):
+    try:
+        with open(plan_path) as fh:
+            cfg = validate_plan(json.load(fh))
+    except (OSError, ValueError) as exc:
+        sys.exit(f"FATAL: bad plan {plan_path}: {exc}")
+    mkvdev.write_makemkv_settings()
+    staging_root()
+
+    run_id = time.strftime("%Y%m%d-%H%M%S") + "-" + secrets.token_hex(2)
+    d = os.path.join(RUNS_ROOT, run_id)
+    os.makedirs(d)
+    write_json(os.path.join(d, "plan.json"), cfg)
+    run = Run(run_id)
+    run.state["controller_pid"] = None
+    run.save()
+    with open(os.path.join(d, "controller.log"), "a") as out:
+        proc = subprocess.Popen([sys.executable, os.path.abspath(__file__), "_run", run_id],
+                                stdin=subprocess.DEVNULL, stdout=out, stderr=out,
+                                start_new_session=True)
+    run.state["controller_pid"] = proc.pid
+    run.save()
+    print(run_id)
+
+
+def cmd_status(run_id):
+    print(json.dumps(load_status(run_id), indent=1))
+
+
+def cmd_wait(run_id):
+    while True:
+        st = load_status(run_id)
+        if st["state"] in TERMINAL_RUN:
+            print(json.dumps(st, indent=1))
+            sys.exit(0 if st["state"] == "complete" else 1)
+        time.sleep(5)
+
+
+# ----------------------------------------------------------------- selftest
+
+def selftest():
+    """Fixtures for the parts that must not be wrong: the robot parser, the
+    destination and title formats, the verifier, the health attribution and the
+    start gate. No hardware, no makemkvcon."""
+    global STAGING
+    STAGING = "/stage"
+
+    f = mkvdev.split_fields('5010,0,1,"a, \\"b\\"","fmt %1","x"')
+    assert f == ["5010", "0", "1", 'a, "b"', "fmt %1", "x"], f
+
+    p = RobotParser()
+    lines = [
+        'MSG:1005,0,1,"MakeMKV v2.0.0 linux(x64-release) started","%1 started","MakeMKV v2.0.0"',
+        'PRGT:5018,0,"Opening Blu-ray disc"', 'PRGC:3307,0,"Scanning contents"',
+        'PRGV:10,20,100',
+        'CINFO:2,0,"FATE_ZERO_D1"', 'CINFO:32,0,"FATE_ZERO_D1"',
+        'TINFO:0,2,0,"Fate/Zero"', 'TINFO:0,9,0,"0:24:30"', 'TINFO:0,11,0,"5000000000"',
+        'TINFO:0,16,0,"00800.mpls"', 'TINFO:0,27,0,"FATE_ZERO_D1_t00.mkv"',
+        'TINFO:1,9,0,"0:24:31"', 'TINFO:1,27,0,"FATE_ZERO_D1_t01.mkv"',
+        'TINFO:2,9,0,"0:00:20"', 'TINFO:2,27,0,"FATE_ZERO_D1_t02.mkv"',
+        'PRGT:5018,0,"Saving all titles to MKV files"',
+    ]
+    for l in lines:
+        p.feed(l)
+    assert not p.copying and p.percent == 20.0 and p.version.startswith("MakeMKV v2.0.0")
+    p.feed('PRGC:5017,0,"Analyzing seamless segments"')
+    assert not p.copying, "seamless-segment analysis must not open the stagger gate"
+    p.feed('PRGC:5018,0,"Saving to MKV file"')
+    assert p.copying
+    p.feed('PRGV:50,50,100')
+    assert p.percent == 50.0
+    assert p.title_seconds(0) == 1470 and p.disc[32] == "FATE_ZERO_D1"
+    p.feed('MSG:5005,0,0,"Copy complete. 2 titles saved.","Copy complete. %1 titles saved.","2"')
+    assert (p.saved, p.failed) == (2, 0) and not p.errors and not p.fatal
+    p.feed("garbage line with no colon")
+    p.feed("TINFO:oops")
+
+    files = {"FATE_ZERO_D1_t00.mkv": 1470.4, "FATE_ZERO_D1_t01.mkv": 1470.9}
+    assert check_rip(0, p, files, 60) == []
+    assert any("exited 2" in b for b in check_rip(2, p, files, 60))
+    assert any("no file was written" in b for b in check_rip(0, p, {"FATE_ZERO_D1_t00.mkv": 1470.0}, 60))
+    assert any("vs 1470s" in b for b in check_rip(0, p, {**files, "FATE_ZERO_D1_t00.mkv": 1200.0}, 60))
+    assert any("ffprobe" in b for b in check_rip(0, p, {**files, "FATE_ZERO_D1_t00.mkv": None}, 60))
+    assert any("no .mkv" in b for b in check_rip(0, p, {}, 60))
+    assert any("cannot verify" in b for b in check_rip(0, p, {**files, "stray.mkv": 5.0}, 60))
+
+    bad = RobotParser()
+    bad.feed('MSG:2003,16,3,"Error \'Scsi error - MEDIUM ERROR\' occurred while reading \'/x\' at offset \'1\'",'
+             '"Error \'%1\' occurred while reading \'%2\' at offset \'%3\'","a","b","c"')
+    bad.feed('MSG:5021,131332,1,"This application version is too old.","fmt","u"')
+    bad.feed('MSG:5004,0,0,"Copy complete. 1 titles saved, 1 failed.","fmt","1","1"')
+    assert len(bad.errors) == 1 and bad.fatal and (bad.saved, bad.failed) == (1, 1)
+    assert len(check_rip(0, bad, files, 60)) >= 3
+
+    anime = {"serial": "S", "category": "anime", "series": "Fate/Zero", "season": 1, "disc": 2}
+    assert destination(anime) == "/stage/anime/Fate - Zero/Season 01/Disc 02"
+    assert segment_title(anime, 3) == "Fate/Zero - S01 Disc 02 - t03"
+    hentai = {"serial": "S", "category": "hentai", "series": "X", "season": None, "disc": 1}
+    assert destination(hentai) == "/stage/hentai/X/Disc 01"
+    assert segment_title(hentai, 0) == "X - Disc 01 - t00"
+    movie = {"serial": "M", "category": "movies", "title": "Akira (1988)"}
+    assert destination(movie) == "/stage/movies/Akira (1988)"
+    assert segment_title(movie, 0) == "Akira (1988)"
+
+    ok = validate_plan({"discs": [anime, movie]})
+    assert ok["max_concurrent"] == 3 and ok["spinup_gap_seconds"] == 30
+    for broken in ({"discs": []}, {"discs": [anime, anime]}, {"discs": [{**anime, "season": None}]},
+                   {"discs": [{**movie, "disc": 1}]}, {"discs": [anime], "typo": 1},
+                   {"discs": [anime], "max_concurrent": 0}, {"discs": [{**anime, "serial": "T"}, {**anime, "serial": "U"}]}):
+        try:
+            validate_plan(broken)
+        except ValueError:
+            continue
+        raise AssertionError(f"plan accepted: {broken}")
+
+    assert parse_health_line("usb 5-1.2-port3: attempt power cycle") is None
+    assert parse_health_line("usb 5-1.2-port3: disabled by hub (EMI?), re-enabling... error -71") == "5-1.2.3"
+    assert parse_health_line("usb 5-1.2.1: USB disconnect, device number 9") == "5-1.2.1"
+    assert parse_health_line("usb 5-1.2: reset high-speed USB device number 4 using xhci_hcd") == "5-1.2"
+    assert parse_health_line("usb 5-1.4.3.3: new full-speed USB device number 12") == "5-1.4.3.3"
+    assert parse_health_line("usb 3-2: USB disconnect, device number 2") == "3-2"
+    assert parse_health_line("eth0: link up") is None
+    assert port_covers("5-1.2", "5-1.2.1") and port_covers("5-1.2.1", "5-1.2.1")
+    assert not port_covers("5-1.2", "5-1.20") and not port_covers("5-1.2", "5-1.3.3")
+    assert port_covers("5", "5-1.4.3.3") and not port_covers("5", "6-1")
+
+    cfg = {"max_concurrent": 2, "spinup_gap_seconds": 30}
+    d = lambda *states: [{"state": s} for s in states]
+    assert may_start(100, d("pending"), cfg, None, None)
+    assert not may_start(100, d("scanning", "pending"), cfg, None, None), "one scanning at a time"
+    assert not may_start(100, d("ripping", "ripping", "pending"), cfg, None, None), "concurrency cap"
+    assert may_start(100, d("ripping", "done", "pending"), cfg, None, None)
+    assert not may_start(100, d("ripping", "pending"), cfg, 130, None), "spin-up gap"
+    assert may_start(131, d("ripping", "pending"), cfg, 130, None)
+    assert not may_start(100, d("pending"), cfg, None, 160), "health pause"
+    assert may_start(161, d("pending"), cfg, None, 160)
+    print("selftest ok")
+
+
+def main():
+    args = sys.argv[1:]
+    if args == ["--selftest"]:
+        selftest()
+    elif len(args) == 2 and args[0] == "_run":
+        Run(args[1]).main()
+    elif len(args) == 2 and args[0] == "status":
+        cmd_status(args[1])
+    elif len(args) == 2 and args[0] == "wait":
+        cmd_wait(args[1])
+    elif len(args) == 1 and not args[0].startswith("-"):
+        cmd_start(args[0])
+    else:
+        sys.exit(__doc__.strip())
+
+
+if __name__ == "__main__":
+    main()
