@@ -29,6 +29,10 @@ Disc states: pending, blocked, scanning, ripping, done, failed, suspect.
 `suspect` means the rip finished but the USB tree misbehaved under that drive;
 it is kept as .partial for a human to judge, never promoted automatically.
 A run is `complete` only when every disc is `done`; otherwise `incomplete`.
+
+Title lengths come from a separate pre-pass: `mkv` mode prints no TINFO lines, so
+each disc is first read with `makemkvcon info` (same scanning slot), and the rip
+is checked against that table. See SPEC.md section 10 for why.
 """
 import collections
 import datetime
@@ -251,6 +255,8 @@ class RobotParser:
         self.fatal = None
         self.saved = self.failed = None
         self.version = None
+        self.announced = {}                           # title id -> playlist, from MSG 3307
+        self.info_problems = []                       # why the info pass cannot vouch for the rip
 
     def feed(self, line):
         kind, _, rest = line.rstrip("\r\n").partition(":")
@@ -289,6 +295,8 @@ class RobotParser:
         fmt = f[4] if len(f) > 4 else text
         if code == 1005:
             self.version = text
+        elif code == 3307:
+            self.announced[int(f[6])] = f[5]
         elif code == 5005:
             self.saved, self.failed = int(f[5]), 0
         elif code == 5004:
@@ -300,6 +308,40 @@ class RobotParser:
 
     def title_seconds(self, tid):
         return hms(self.titles[tid].get(9, ""))
+
+    def take_info(self, info, info_rc):
+        """Adopt the title table from an `info` pass over the same disc.
+
+        `mkv` mode never prints TINFO, so the table (lengths, output names, source
+        playlists) can only come from `info`. Its exit code and fatal messages
+        count against the rip like the rip's own.
+        """
+        self.titles, self.disc = info.titles, info.disc
+        bad = self.info_problems = []
+        if info_rc != 0:
+            bad.append(f"the title info pass exited {info_rc}")
+        if info.fatal:
+            bad.append(f"the title info pass reported a fatal error: {info.fatal}")
+        if info.errors:
+            bad.append(f"{len(info.errors)} read error message(s) from the title info pass")
+        if not info.titles:
+            bad.append("the title info pass listed no titles")
+
+    def check_announced(self):
+        """Cross-check the rip against the adopted table. Title ids are positions
+        in a list each invocation builds for itself; if the two disagree about
+        which playlist an id is, the rip would be verified against the wrong
+        lengths. Every id the rip announced ("File 00009.mpls was added as title
+        #0") must name the same source playlist (TINFO 16) in the table."""
+        if not self.announced:
+            self.info_problems.append(
+                "the rip log announces no titles, so it cannot be matched to the title info")
+        for tid, playlist in sorted(self.announced.items()):
+            listed = self.titles.get(tid, {}).get(16)
+            if listed != playlist:
+                self.info_problems.append(
+                    f"title {tid} is {playlist} in the rip but {listed or 'missing'} in the "
+                    "title info pass; the disc may have changed between them")
 
 
 # ------------------------------------------------------------- verification
@@ -318,10 +360,13 @@ def check_rip(rc, parser, files, min_title_seconds):
     """-> list of reasons this rip cannot be trusted; empty means it can.
 
     `files` maps each ripped file name to its measured seconds (None when
-    ffprobe could not read it). Pure, so the selftest can drive it.
+    ffprobe could not read it); `rc` is makemkvcon's exit status, None when it
+    was never recorded. Pure, so the selftest can drive it.
     """
-    bad = []
-    if rc != 0:
+    bad = list(parser.info_problems)
+    if rc is None:
+        bad.append("makemkvcon's exit status was not recorded and its log has no clean copy-complete line")
+    elif rc != 0:
         bad.append(f"makemkvcon exited {rc}")
     if parser.fatal:
         bad.append(f"fatal: {parser.fatal}")
@@ -476,7 +521,8 @@ def write_json(path, obj):
 
 
 class Run:
-    def __init__(self, run_id):
+    def __init__(self, run_id, state=None):
+        """`state` resumes an existing run (finalize); without it, a fresh one."""
         self.id = run_id
         self.dir = os.path.join(RUNS_ROOT, run_id)
         with open(os.path.join(self.dir, "plan.json")) as fh:
@@ -486,14 +532,14 @@ class Run:
         self.gate_open_at = None
         self.paused_until = None
         self.procs = {}
-        self.state = {
+        self.state = state or {
             "run_id": run_id, "state": "running", "started": now_iso(), "finished": None,
             "controller_pid": os.getpid(),
             "health": {"dmesg": "pending", "paused_until": None, "events": []},
             "discs": [{"index": i, "serial": e["serial"], "plan": e, "dest": destination(e),
                        "state": "pending", "reason": None, "drive": None, "progress": None,
                        "started": None, "copy_started": None, "finished": None,
-                       "suspect": [], "titles": None, "eject": None,
+                       "suspect": [], "titles": None, "eject": None, "makemkv_rc": None,
                        "titles_done": 0, "titles_total": None, "errors": []}
                       for i, e in enumerate(self.cfg["discs"])],
         }
@@ -631,14 +677,18 @@ class Run:
 
         for j in jobs:
             j.join()
+        self.conclude()
+        log(f"run {self.state['state']}")
+
+    def conclude(self):
+        """Derive the run's verdict from its discs. Also what finalize recomputes."""
         with self.lock:
             done = all(d["state"] == "done" for d in self.discs)
             self.state["state"] = "complete" if done else "incomplete"
-            self.state["finished"] = now_iso()
+            self.state["finished"] = self.state["finished"] or now_iso()
             self.state["problems"] = [{"index": d["index"], "serial": d["serial"], "state": d["state"],
                                        "reason": d["reason"]} for d in self.discs if d["state"] != "done"]
             self.save()
-        log(f"run {self.state['state']}")
 
     def timeout_scans(self):
         """A disc that never leaves analysis would hold the single scanning slot
@@ -652,8 +702,133 @@ class Run:
                     proc.kill()
 
 
+def info_command(dev, min_title_seconds):
+    return ["makemkvcon", "-r", "--noscan", f"--minlength={min_title_seconds}", "info", f"dev:{dev}"]
+
+
+def rip_command(dev, min_title_seconds, partial):
+    return ["makemkvcon", "-r", "--noscan", "--progress=-same", f"--minlength={min_title_seconds}",
+            "mkv", f"dev:{dev}", "all", partial]
+
+
+def run_makemkvcon(cmd, log_path, parser, on_proc=None, on_line=None, timeout=None):
+    """Run one makemkvcon, teeing its robot output to `log_path` and into `parser`.
+    -> its exit status. `on_proc` receives the process so a watchdog can kill it;
+    `timeout` is for callers with no watchdog of their own."""
+    with open(log_path, "w") as raw:
+        proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                                stdin=subprocess.DEVNULL, text=True, errors="replace")
+        if on_proc:
+            on_proc(proc)
+        timer = threading.Timer(timeout, proc.kill) if timeout else None
+        if timer:
+            timer.start()
+        try:
+            for line in proc.stdout:
+                raw.write(line)
+                raw.flush()
+                parser.feed(line)
+                if on_line:
+                    on_line()
+            return proc.wait()
+        finally:
+            if timer:
+                timer.cancel()
+
+
+def parse_log(path, parser=None):
+    parser = parser or RobotParser()
+    with open(path, errors="replace") as fh:
+        for line in fh:
+            parser.feed(line)
+    return parser
+
+
+def sync_disc(disc, parser, min_title_seconds):
+    """Mirror the parser's running tallies onto the disc record."""
+    disc["titles_total"] = sum(1 for t in parser.titles
+                               if (parser.title_seconds(t) or 0) >= min_title_seconds) or None
+    # The step in flight is not finished, so it does not count as done yet.
+    disc["titles_done"] = max(parser.saves_started - 1, 0)
+    disc["errors"] = list(parser.errors) + parser.info_problems + [e["detail"] for e in disc["suspect"]]
+
+
+def set_segment_titles(partial, manifest):
+    for t in manifest["titles"]:
+        r = subprocess.run(["mkvpropedit", os.path.join(partial, t["file"]),
+                            "--edit", "info", "--set", f"title={t['segment_title']}"],
+                           capture_output=True, text=True)
+        if r.returncode >= 2:
+            raise RuntimeError(f"mkvpropedit failed on {t['file']}: {r.stdout[-200:]}")
+
+
+def build_manifest(disc, parser, partial, files):
+    titles = []
+    for fname, secs in sorted(files.items()):
+        tid = title_for_file(parser, fname)
+        a = parser.titles[tid]
+        titles.append({
+            "id": tid, "name": a.get(2), "file": fname, "chapters": a.get(8),
+            "duration_seconds": parser.title_seconds(tid), "duration": a.get(9),
+            "size_bytes": int(a[11]) if a.get(11, "").isdigit() else None,
+            "source_playlist": a.get(16), "file_bytes": os.path.getsize(os.path.join(partial, fname)),
+            "file_seconds": round(secs, 3), "segment_title": segment_title(disc["plan"])})
+    return {"plan": disc["plan"], "drive": disc["drive"], "makemkv": parser.version,
+            "disc_label": parser.disc.get(32) or parser.disc.get(2), "titles": titles,
+            "errors": parser.errors, "suspect_events": disc["suspect"],
+            "started": disc["started"], "copy_started": disc["copy_started"], "finished": now_iso()}
+
+
+def finish_disc(run, disc, parser, rc, forced=None):
+    """Verify a finished rip and, if it holds up, promote it out of .partial.
+
+    The one tail shared by a disc's normal finish and by `finalize`, so a disc
+    saved later goes through exactly the checks, manifest, titling, rename and
+    eject a disc finished on time does. `forced` is a failure known before
+    looking at the files (the scan watchdog's kill).
+    """
+    partial = disc["dest"] + ".partial"
+    disc["reason"] = None
+    disc["progress"] = {"phase": "verifying", "current": parser.pv_max, "total": parser.pv_max}
+    files = {}
+    for name in sorted(os.listdir(partial)):
+        if name.lower().endswith(".mkv"):
+            try:
+                files[name] = duration(os.path.join(partial, name)) * 60
+            except ValueError:
+                files[name] = None
+    bad = check_rip(rc, parser, files, run.cfg["min_title_seconds"])
+    if forced:
+        bad.insert(0, forced)
+    disc["titles"] = len(files)
+    sync_disc(disc, parser, run.cfg["min_title_seconds"])
+    disc["titles_done"] = len(files)
+    if bad:
+        run.set_state(disc, "failed", "; ".join(bad) + f" (kept at {partial})")
+        return
+    manifest = build_manifest(disc, parser, partial, files)
+    if disc["suspect"]:
+        write_json(os.path.join(partial, "manifest.json"), manifest)
+        run.set_state(disc, "suspect",
+                      f"rip verified, but the USB tree reported {len(disc['suspect'])} error(s) "
+                      f"under this drive; kept at {partial} for review")
+        return
+    set_segment_titles(partial, manifest)
+    write_json(os.path.join(partial, "manifest.json"), manifest)
+    if os.path.exists(disc["dest"]):
+        run.set_state(disc, "failed", f"destination appeared during the rip: {disc['dest']}")
+        return
+    os.rename(partial, disc["dest"])
+    try:
+        mkvdev.eject(disc["drive"])
+        disc["eject"] = "ok"
+    except OSError as exc:
+        disc["eject"] = f"failed: {exc}"
+    run.set_state(disc, "done")
+
+
 class Job(threading.Thread):
-    """One disc: rip it, verify it, then promote it out of .partial."""
+    """One disc: read its titles, rip it, verify it, then promote it out of .partial."""
 
     def __init__(self, run, disc):
         super().__init__(daemon=False)
@@ -665,111 +840,52 @@ class Job(threading.Thread):
         run, disc = self.run_, self.disc
         try:
             rc = self.rip()
-            self.finish(rc)
+            if rc is None:
+                reasons = ([disc["reason"]] if disc["reason"] else []) + self.parser.info_problems
+                run.set_state(disc, "failed", "; ".join(reasons) + " (no rip was attempted)")
+                return
+            finish_disc(run, disc, self.parser, rc, forced=disc["reason"])
         except Exception as exc:                      # noqa: BLE001 -- must not strand the slot
             run.set_state(disc, "failed", f"internal error: {exc!r}")
 
+    def register(self, proc):
+        with self.run_.lock:
+            self.run_.procs[self.disc["index"]] = proc
+
     def rip(self):
-        run, disc = self.run_, self.disc
+        """-> makemkvcon's exit status, or None when the title info pass was bad
+        and the rip was not started: copying hours of a disc that cannot be
+        verified afterwards is the one thing not worth doing."""
+        run, disc, p = self.run_, self.disc, self.parser
+        min_len = run.cfg["min_title_seconds"]
+        prefix = os.path.join(run.dir, f"disc-{disc['index']:02d}")
+
+        info = RobotParser()
+        info_rc = run_makemkvcon(info_command(disc["drive"]["dev"], min_len), prefix + ".info.log",
+                                 info, on_proc=self.register)
+        p.take_info(info, info_rc)
+        sync_disc(disc, p, min_len)
+        if p.info_problems or disc["reason"]:
+            return None
+
         os.makedirs(self.partial)
-        cmd = ["makemkvcon", "-r", "--noscan", "--progress=-same",
-               f"--minlength={run.cfg['min_title_seconds']}",
-               "mkv", f"dev:{disc['drive']['dev']}", "all", self.partial]
-        with open(os.path.join(run.dir, f"disc-{disc['index']:02d}.log"), "w") as raw:
-            proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                                    stdin=subprocess.DEVNULL, text=True, errors="replace")
-            with run.lock:
-                run.procs[disc["index"]] = proc
-            last_pct = -1.0
-            for line in proc.stdout:
-                raw.write(line)
-                raw.flush()
-                self.parser.feed(line)
-                p = self.parser
-                if p.copying and disc["state"] == "scanning":
-                    disc["copy_started"] = now_iso()
-                    run.set_state(disc, "ripping")
-                self.sync()
-                if abs(p.percent - last_pct) >= 0.1:
-                    last_pct = p.percent
-                    disc["progress"] = {"phase": p.prgc or p.prgt, "current": p.pv_total, "total": p.pv_max}
-            return proc.wait()
+        last_pct = -1.0
 
-    def sync(self):
-        """Mirror the parser's running tallies onto the disc record."""
-        disc, p = self.disc, self.parser
-        disc["titles_total"] = sum(1 for t in p.titles
-                                   if (p.title_seconds(t) or 0) >= self.run_.cfg["min_title_seconds"]) or None
-        # The step in flight is not finished, so it does not count as done yet.
-        disc["titles_done"] = max(p.saves_started - 1, 0)
-        disc["errors"] = list(p.errors) + [e["detail"] for e in disc["suspect"]]
+        def on_line():
+            nonlocal last_pct
+            if p.copying and disc["state"] == "scanning":
+                disc["copy_started"] = now_iso()
+                run.set_state(disc, "ripping")
+            sync_disc(disc, p, min_len)
+            if abs(p.percent - last_pct) >= 0.1:
+                last_pct = p.percent
+                disc["progress"] = {"phase": p.prgc or p.prgt, "current": p.pv_total, "total": p.pv_max}
 
-    def finish(self, rc):
-        run, disc, p = self.run_, self.disc, self.parser
-        disc["progress"] = {"phase": "verifying", "current": p.pv_max, "total": p.pv_max}
-        files = {}
-        for name in sorted(os.listdir(self.partial)):
-            if name.lower().endswith(".mkv"):
-                try:
-                    files[name] = duration(os.path.join(self.partial, name)) * 60
-                except ValueError:
-                    files[name] = None
-        bad = check_rip(rc, p, files, run.cfg["min_title_seconds"])
-        if disc["reason"]:                       # set by the scan watchdog before it killed us
-            bad.insert(0, disc["reason"])
-        disc["titles"] = len(files)
-        self.sync()
-        disc["titles_done"] = len(files)
-        if bad:
-            run.set_state(disc, "failed", "; ".join(bad) + f" (kept at {self.partial})")
-            return
-        manifest = self.manifest(files)
-        if disc["suspect"]:
-            self.write_manifest(manifest)
-            run.set_state(disc, "suspect",
-                          f"rip verified, but the USB tree reported {len(disc['suspect'])} error(s) "
-                          f"under this drive; kept at {self.partial} for review")
-            return
-        self.set_segment_titles(manifest)
-        self.write_manifest(manifest)
-        if os.path.exists(disc["dest"]):
-            run.set_state(disc, "failed", f"destination appeared during the rip: {disc['dest']}")
-            return
-        os.rename(self.partial, disc["dest"])
-        try:
-            mkvdev.eject(disc["drive"])
-            disc["eject"] = "ok"
-        except OSError as exc:
-            disc["eject"] = f"failed: {exc}"
-        run.set_state(disc, "done")
-
-    def set_segment_titles(self, manifest):
-        for t in manifest["titles"]:
-            r = subprocess.run(["mkvpropedit", os.path.join(self.partial, t["file"]),
-                                "--edit", "info", "--set", f"title={t['segment_title']}"],
-                               capture_output=True, text=True)
-            if r.returncode >= 2:
-                raise RuntimeError(f"mkvpropedit failed on {t['file']}: {r.stdout[-200:]}")
-
-    def manifest(self, files):
-        run, disc, p = self.run_, self.disc, self.parser
-        titles = []
-        for fname, secs in sorted(files.items()):
-            tid = title_for_file(p, fname)
-            a = p.titles[tid]
-            titles.append({
-                "id": tid, "name": a.get(2), "file": fname, "chapters": a.get(8),
-                "duration_seconds": p.title_seconds(tid), "duration": a.get(9),
-                "size_bytes": int(a[11]) if a.get(11, "").isdigit() else None,
-                "source_playlist": a.get(16), "file_bytes": os.path.getsize(os.path.join(self.partial, fname)),
-                "file_seconds": round(secs, 3), "segment_title": segment_title(disc["plan"])})
-        return {"plan": disc["plan"], "drive": disc["drive"], "makemkv": p.version,
-                "disc_label": p.disc.get(32) or p.disc.get(2), "titles": titles,
-                "errors": p.errors, "suspect_events": disc["suspect"],
-                "started": disc["started"], "copy_started": disc["copy_started"], "finished": now_iso()}
-
-    def write_manifest(self, manifest):
-        write_json(os.path.join(self.partial, "manifest.json"), manifest)
+        rc = run_makemkvcon(rip_command(disc["drive"]["dev"], min_len, self.partial), prefix + ".log",
+                            p, on_proc=self.register, on_line=on_line)
+        disc["makemkv_rc"] = rc
+        p.check_announced()
+        return rc
 
 
 # ---------------------------------------------------------------------- CLI
@@ -898,6 +1014,68 @@ def cmd_wait(run_id):
 
 # ----------------------------------------------------------------- selftest
 
+# Trimmed from a real disc (Parallel World Pharmacy D1, 2026-11-09): the `mkv` run prints only the
+# MSG 3307 announcements, never a TINFO; the `info` run has the table. (The 5005 line is
+# the format makemkvcon prints at the end of a copy; the live log had not reached it yet.)
+RIP_LOG = [
+    'MSG:1005,0,1,"MakeMKV v2.0.0 linux(x64-release) started","%1 started","MakeMKV v2.0.0 linux(x64-release)"',
+    'PRGT:5018,0,"Scanning CD-ROM devices"',
+    'PRGT:3404,0,"Opening Blu-ray disc"',
+    'MSG:3307,0,2,"File 00009.mpls was added as title #0","File %1 was added as title #%2","00009.mpls","0"',
+    'MSG:3307,0,2,"File 00010.mpls was added as title #1","File %1 was added as title #%2","00010.mpls","1"',
+    'MSG:3307,0,2,"File 00011.mpls was added as title #2","File %1 was added as title #%2","00011.mpls","2"',
+    'MSG:3307,0,2,"File 00012.mpls was added as title #3","File %1 was added as title #%2","00012.mpls","3"',
+    'MSG:3307,0,2,"File 00013.mpls was added as title #4","File %1 was added as title #%2","00013.mpls","4"',
+    'MSG:3307,0,2,"File 00014.mpls was added as title #5","File %1 was added as title #%2","00014.mpls","5"',
+    'MSG:3307,0,2,"File 00015.mpls was added as title #6","File %1 was added as title #%2","00015.mpls","6"',
+    'MSG:3307,16777216,2,"File 00045.mpls was added as title #7","File %1 was added as title #%2","00045.mpls","7"',
+    'MSG:3307,16777216,2,"File 00008.mpls was added as title #8","File %1 was added as title #%2","00008.mpls","8"',
+    'MSG:3307,0,2,"File 00008.m2ts was added as title #9","File %1 was added as title #%2","00008.m2ts","9"',
+    'MSG:3307,16777216,2,"File 00026.m2ts was added as title #10","File %1 was added as title #%2","00026.m2ts","10"',
+    'PRGC:5017,0,"Saving to MKV file"',
+    'MSG:5005,0,1,"Copy complete. 11 titles saved.","Copy complete. %1 titles saved.","11"',
+]
+INFO_LOG = [
+    'MSG:5011,0,0,"Operation successfully completed","Operation successfully completed"',
+    'TCOUNT:11',
+    'CINFO:2,0,"Parallel World Pharmacy D1"',
+    'CINFO:32,0,"ParallelWorldPharmacy_D1"',
+    'TINFO:0,9,0,"0:23:42"',
+    'TINFO:0,16,0,"00009.mpls"',
+    'TINFO:0,27,0,"Parallel World Pharmacy D1_t00.mkv"',
+    'TINFO:1,9,0,"0:23:42"',
+    'TINFO:1,16,0,"00010.mpls"',
+    'TINFO:1,27,0,"Parallel World Pharmacy D1_t01.mkv"',
+    'TINFO:2,9,0,"0:23:42"',
+    'TINFO:2,16,0,"00011.mpls"',
+    'TINFO:2,27,0,"Parallel World Pharmacy D1_t02.mkv"',
+    'TINFO:3,9,0,"0:23:42"',
+    'TINFO:3,16,0,"00012.mpls"',
+    'TINFO:3,27,0,"Parallel World Pharmacy D1_t03.mkv"',
+    'TINFO:4,9,0,"0:23:42"',
+    'TINFO:4,16,0,"00013.mpls"',
+    'TINFO:4,27,0,"Parallel World Pharmacy D1_t04.mkv"',
+    'TINFO:5,9,0,"0:23:42"',
+    'TINFO:5,16,0,"00014.mpls"',
+    'TINFO:5,27,0,"Parallel World Pharmacy D1_t05.mkv"',
+    'TINFO:6,9,0,"0:23:42"',
+    'TINFO:6,16,0,"00015.mpls"',
+    'TINFO:6,27,0,"Parallel World Pharmacy D1_t06.mkv"',
+    'TINFO:7,9,0,"0:23:41"',
+    'TINFO:7,16,0,"00045.mpls"',
+    'TINFO:7,27,0,"Parallel World Pharmacy D1_t07.mkv"',
+    'TINFO:8,9,0,"3:09:36"',
+    'TINFO:8,16,0,"00008.mpls"',
+    'TINFO:8,27,0,"Parallel World Pharmacy D1_t08.mkv"',
+    'TINFO:9,9,0,"0:01:00"',
+    'TINFO:9,16,0,"00008.m2ts"',
+    'TINFO:9,27,0,"Parallel World Pharmacy D1_t09.mkv"',
+    'TINFO:10,9,0,"0:12:42"',
+    'TINFO:10,16,0,"00026.m2ts"',
+    'TINFO:10,27,0,"Parallel World Pharmacy D1_t10.mkv"',
+]
+
+
 def selftest():
     """Fixtures for the parts that must not be wrong: the robot parser, the
     destination and title formats, the verifier, the health attribution and the
@@ -1016,7 +1194,7 @@ def selftest():
                                    "titles_done": 0, "titles_total": None, "errors": []}]})
     assert view["health"] == {"dmesg_available": False, "paused": True, "pause_reason": "boom"}
     assert set(view) == {"run_id", "state", "started_at", "finished_at", "discs", "health"}
-    global RUNS_ROOT, pid_alive
+    global RUNS_ROOT, pid_alive, duration
     real_alive = pid_alive
     with tempfile.TemporaryDirectory() as tmp:
         RUNS_ROOT = tmp
@@ -1052,6 +1230,49 @@ def selftest():
         assert [r["run_id"] for r in listed] == ["a-dead", "b-done", "c-live"]
         assert set(listed[0]) == {"run_id", "state", "started_at"}
     RUNS_ROOT, pid_alive = os.environ.get("MKV_RIP_RUNS", "/work/rips"), real_alive
+
+    # ---- title info pre-pass: a real mkv log has no TINFO, the info log supplies it
+    def parsed(lines, parser=None):
+        parser = parser or RobotParser()
+        for l in lines:
+            parser.feed(l)
+        return parser
+
+    def verified(info_lines=INFO_LOG, info_rc=0):
+        rip = parsed(RIP_LOG)
+        rip.take_info(parsed(info_lines), info_rc)
+        rip.check_announced()
+        return rip
+
+    rip = parsed(RIP_LOG)
+    assert not rip.titles and len(rip.announced) == 11 and rip.announced[0] == "00009.mpls"
+    rip = verified()
+    assert rip.info_problems == [] and len(rip.titles) == 11 and rip.disc[32] == "ParallelWorldPharmacy_D1"
+    assert (rip.saved, rip.failed) == (11, 0)
+    disc = {"suspect": []}
+    sync_disc(disc, rip, 60)
+    assert disc["titles_total"] == 11 and disc["errors"] == []
+    names = {tid: a[27] for tid, a in rip.titles.items()}
+    disk = {name: rip.title_seconds(tid) + 0.4 for tid, name in names.items()}
+    assert len(disk) == 11 and check_rip(0, rip, disk, 60) == []
+    assert any("not recorded" in b for b in check_rip(None, rip, disk, 60))
+    assert any("exited 1" in b for b in check_rip(1, rip, disk, 60))
+    assert any("vs 1422s" in b for b in check_rip(0, rip, {**disk, names[0]: 900.0}, 60))
+
+    swapped = [l.replace('"00012.mpls"', '"00099.mpls"') if l.startswith("TINFO:3,16,") else l for l in INFO_LOG]
+    mismatch = verified(swapped)
+    assert len(mismatch.info_problems) == 1 and "title 3 is 00012.mpls in the rip but 00099.mpls" in mismatch.info_problems[0]
+    assert any("title 3 is" in b for b in check_rip(0, mismatch, disk, 60))
+    no_ten = [l for l in INFO_LOG if not l.startswith("TINFO:10,")]
+    assert "title 10 is 00026.m2ts in the rip but missing" in verified(no_ten).info_problems[0]
+    assert any("info pass exited 1" in b for b in check_rip(0, verified(INFO_LOG, 1), disk, 60))
+    fatal_info = parsed(['MSG:5010,0,1,"Failed to open disc","fmt"'])
+    gone = RobotParser()
+    gone.take_info(fatal_info, 0)
+    assert any("fatal error: Failed to open disc" in b for b in gone.info_problems)
+    assert any("announces no titles" in b for b in (lambda r: (r.take_info(parsed(INFO_LOG), 0), r.check_announced(), r.info_problems)[2])(RobotParser()))
+
+    RUNS_ROOT = os.environ.get("MKV_RIP_RUNS", "/work/rips")
     print("selftest ok")
 
 
