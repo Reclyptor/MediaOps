@@ -4,6 +4,7 @@
 usage: mkv-rip PLAN.json            start a run detached; prints its run id
        mkv-rip status RUN_ID        JSON: per-disc state, progress, errors
        mkv-rip wait RUN_ID          block until the run is terminal
+       mkv-rip list                 every run: id, state, start time
        mkv-rip --selftest           parser / scheduler / verifier fixtures
 
 plan: {"discs": [{"serial": "BP52...", "category": "anime", "series": "Name",
@@ -234,6 +235,8 @@ class RobotParser:
         self.disc = {}                                # CINFO attr -> value
         self.prgt = self.prgc = ""
         self.percent = 0.0
+        self.pv_total = self.pv_max = 0
+        self.saves_started = 0                        # "Saving to MKV file" steps seen
         self.copying = False
         self.errors = []                              # MSG lines that void the rip
         self.fatal = None
@@ -257,9 +260,11 @@ class RobotParser:
         self.prgc = f[2]
         if self.prgt.startswith(SAVE_PRGT_PREFIX) and self.prgc == COPY_PRGC:
             self.copying = True
+            self.saves_started += 1
 
     def _prgv(self, f, _line):
         cur, total, mx = int(f[0]), int(f[1]), int(f[2])
+        self.pv_total, self.pv_max = total, mx
         if mx:
             self.percent = round(100.0 * total / mx, 1)
 
@@ -479,7 +484,8 @@ class Run:
             "discs": [{"index": i, "serial": e["serial"], "plan": e, "dest": destination(e),
                        "state": "pending", "reason": None, "drive": None, "progress": None,
                        "started": None, "copy_started": None, "finished": None,
-                       "suspect": [], "titles": None, "eject": None}
+                       "suspect": [], "titles": None, "eject": None,
+                       "titles_done": 0, "titles_total": None, "errors": []}
                       for i, e in enumerate(self.cfg["discs"])],
         }
 
@@ -515,7 +521,8 @@ class Run:
         found = {d["serial"]: d for d in mkvdev.drives()}
         drive = found.get(disc["serial"])
         if drive is None:
-            return f"no drive with serial {disc['serial']} (drives present: {sorted(found)})"
+            return (f"Drive {disc['serial']} is not on the USB bus (it is missing from sysfs): it has "
+                    "fallen off the bus and the hub reset is needed, which needs root on the node.")
         disc["drive"] = {k: drive[k] for k in ("dev", "sg", "usb_port", "link_mbps")}
         # A drive still becoming ready reports no media for a few seconds after
         # a disc goes in; wait it out rather than block a loaded drive.
@@ -673,14 +680,24 @@ class Job(threading.Thread):
                 if p.copying and disc["state"] == "scanning":
                     disc["copy_started"] = now_iso()
                     run.set_state(disc, "ripping")
+                self.sync()
                 if abs(p.percent - last_pct) >= 0.1:
                     last_pct = p.percent
-                    disc["progress"] = {"percent": p.percent, "phase": p.prgt, "step": p.prgc}
+                    disc["progress"] = {"phase": p.prgc or p.prgt, "current": p.pv_total, "total": p.pv_max}
             return proc.wait()
+
+    def sync(self):
+        """Mirror the parser's running tallies onto the disc record."""
+        disc, p = self.disc, self.parser
+        disc["titles_total"] = sum(1 for t in p.titles
+                                   if (p.title_seconds(t) or 0) >= self.run_.cfg["min_title_seconds"]) or None
+        # The step in flight is not finished, so it does not count as done yet.
+        disc["titles_done"] = max(p.saves_started - 1, 0)
+        disc["errors"] = list(p.errors) + [e["detail"] for e in disc["suspect"]]
 
     def finish(self, rc):
         run, disc, p = self.run_, self.disc, self.parser
-        disc["progress"] = {"percent": p.percent, "phase": "verifying", "step": ""}
+        disc["progress"] = {"phase": "verifying", "current": p.pv_max, "total": p.pv_max}
         files = {}
         for name in sorted(os.listdir(self.partial)):
             if name.lower().endswith(".mkv"):
@@ -692,6 +709,8 @@ class Job(threading.Thread):
         if disc["reason"]:                       # set by the scan watchdog before it killed us
             bad.insert(0, disc["reason"])
         disc["titles"] = len(files)
+        self.sync()
+        disc["titles_done"] = len(files)
         if bad:
             run.set_state(disc, "failed", "; ".join(bad) + f" (kept at {self.partial})")
             return
@@ -779,6 +798,41 @@ def load_status(run_id):
     return st
 
 
+def status_view(st):
+    """The caller-facing shape of a run; state.json also carries controller internals."""
+    h = st["health"]
+    events = h["events"]
+    return {
+        "run_id": st["run_id"], "state": st["state"],
+        "started_at": st["started"], "finished_at": st["finished"],
+        "discs": [{"serial": d["serial"], "dest": d["dest"], "state": d["state"],
+                   "reason": d["reason"], "progress": d["progress"],
+                   "titles_done": d["titles_done"], "titles_total": d["titles_total"],
+                   "errors": d["errors"]} for d in st["discs"]],
+        "health": {"dmesg_available": h["dmesg"] == "ok", "paused": h["paused_until"] is not None,
+                   "pause_reason": events[-1]["detail"] if h["paused_until"] and events else None},
+    }
+
+
+def active_run():
+    """-> the id of a run still running, or None. Goes through load_status so a
+    run whose controller died does not block new runs forever."""
+    for run_id in sorted(os.listdir(RUNS_ROOT)) if os.path.isdir(RUNS_ROOT) else []:
+        if os.path.isfile(os.path.join(RUNS_ROOT, run_id, "state.json")) \
+                and load_status(run_id)["state"] == "running":
+            return run_id
+    return None
+
+
+def cmd_list():
+    runs = []
+    for run_id in sorted(os.listdir(RUNS_ROOT)) if os.path.isdir(RUNS_ROOT) else []:
+        if os.path.isfile(os.path.join(RUNS_ROOT, run_id, "state.json")):
+            st = load_status(run_id)
+            runs.append({"run_id": run_id, "state": st["state"], "started_at": st["started"]})
+    print(json.dumps(runs, indent=1))
+
+
 def cmd_start(plan_path):
     try:
         with open(plan_path) as fh:
@@ -787,6 +841,10 @@ def cmd_start(plan_path):
         sys.exit(f"FATAL: bad plan {plan_path}: {exc}")
     mkvdev.write_makemkv_settings()
     staging_root()
+    busy = active_run()
+    if busy:
+        sys.exit(f"FATAL: run {busy} is still running; wait for it (mkv-rip wait {busy}) "
+                 "before starting another, since two controllers would not share the stagger.")
 
     run_id = time.strftime("%Y%m%d-%H%M%S") + "-" + secrets.token_hex(2)
     d = os.path.join(RUNS_ROOT, run_id)
@@ -805,14 +863,14 @@ def cmd_start(plan_path):
 
 
 def cmd_status(run_id):
-    print(json.dumps(load_status(run_id), indent=1))
+    print(json.dumps(status_view(load_status(run_id)), indent=1))
 
 
 def cmd_wait(run_id):
     while True:
         st = load_status(run_id)
         if st["state"] in TERMINAL_RUN:
-            print(json.dumps(st, indent=1))
+            print(json.dumps(status_view(st), indent=1))
             sys.exit(0 if st["state"] == "complete" else 1)
         time.sleep(5)
 
@@ -915,6 +973,17 @@ def selftest():
     assert may_start(131, d("ripping", "pending"), cfg, 130, None)
     assert not may_start(100, d("pending"), cfg, None, 160), "health pause"
     assert may_start(161, d("pending"), cfg, None, 160)
+    q = RobotParser()
+    for l in ['PRGT:5018,0,"Saving all titles to MKV files"', 'PRGC:5018,0,"Saving to MKV file"',
+              'PRGC:5018,0,"Saving to MKV file"', 'PRGV:30,60,120']:
+        q.feed(l)
+    assert q.saves_started == 2 and (q.pv_total, q.pv_max) == (60, 120)
+    view = status_view({"run_id": "r", "state": "running", "started": "t", "finished": None,
+                        "health": {"dmesg": "unavailable: x", "paused_until": "z", "events": [{"detail": "boom"}]},
+                        "discs": [{"serial": "S", "dest": "/d", "state": "pending", "reason": None, "progress": None,
+                                   "titles_done": 0, "titles_total": None, "errors": []}]})
+    assert view["health"] == {"dmesg_available": False, "paused": True, "pause_reason": "boom"}
+    assert set(view) == {"run_id", "state", "started_at", "finished_at", "discs", "health"}
     print("selftest ok")
 
 
@@ -924,6 +993,8 @@ def main():
         selftest()
     elif len(args) == 2 and args[0] == "_run":
         Run(args[1]).main()
+    elif args == ["list"]:
+        cmd_list()
     elif len(args) == 2 and args[0] == "status":
         cmd_status(args[1])
     elif len(args) == 2 and args[0] == "wait":
