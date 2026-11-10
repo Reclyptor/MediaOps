@@ -1,0 +1,40 @@
+#!/usr/bin/env python3
+"""List the optical drives as JSON lines.
+
+usage: mkv-drives [--labels]
+
+One object per drive, in sr order:
+  {"serial", "dev", "sg", "usb_port", "link_mbps", "tray", "media", "status", "label"}
+
+Safe to run at any time: it reads /sys and asks each drive for its tray/media
+state, and never spins a disc up. `link_mbps` is the number to watch -- the
+drives belong at 480; 12 means the port fell back to USB 1.1 and needs the hub
+reset. `status` is the raw state: "not_ready" is a drive still becoming ready,
+which `media: false` alone would misreport as empty.
+
+`label` is null unless --labels is passed. Labels come from makemkvcon's drive
+list, which touches EVERY drive holding media, so it is opt-in.
+"""
+import json
+import sys
+
+import mkvdev
+
+
+def main():
+    args = sys.argv[1:]
+    if set(args) - {"--labels"}:
+        sys.exit(__doc__.strip())
+
+    found = mkvdev.drives()
+    labels = mkvdev.disc_labels() if "--labels" in args else {}
+    if not found:
+        print("no optical drives found under /sys/class/block", file=sys.stderr)
+    for d in found:
+        d.pop("usb_dir")
+        d["label"] = labels.get(d["dev"])
+        print(json.dumps(d))
+
+
+if __name__ == "__main__":
+    main()
