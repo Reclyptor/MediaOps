@@ -521,8 +521,8 @@ class Run:
         found = {d["serial"]: d for d in mkvdev.drives()}
         drive = found.get(disc["serial"])
         if drive is None:
-            return (f"Drive {disc['serial']} is not on the USB bus (it is missing from sysfs): it has "
-                    "fallen off the bus and the hub reset is needed, which needs root on the node.")
+            return (f"Drive {disc['serial']} is not on the USB bus; it has likely dropped off the hub "
+                    "and needs the hub reset (see the makemkv skill).")
         disc["drive"] = {k: drive[k] for k in ("dev", "sg", "usb_port", "link_mbps")}
         # A drive still becoming ready reports no media for a few seconds after
         # a disc goes in; wait it out rather than block a loaded drive.
@@ -792,9 +792,17 @@ def load_status(run_id):
         # The controller died without writing a verdict (pod restart, kill -9).
         # Saying "running" forever would hang every `wait`.
         st["state"] = "incomplete"
+        st["reason"] = "controller died"
+        st["finished"] = st["finished"] or now_iso()
+        for d in st["discs"]:
+            if d["state"] not in TERMINAL_DISC:
+                d["state"], d["reason"] = "failed", "The controller died before this disc finished."
         st["problems"] = [{"index": d["index"], "serial": d["serial"], "state": d["state"],
-                           "reason": d["reason"] or "controller died before this disc finished"}
-                          for d in st["discs"] if d["state"] != "done"]
+                           "reason": d["reason"]} for d in st["discs"] if d["state"] != "done"]
+        try:                                   # persist, so the verdict outlives this call
+            write_json(os.path.join(RUNS_ROOT, run_id, "state.json"), st)
+        except OSError:
+            pass
     return st
 
 
@@ -824,6 +832,13 @@ def active_run():
     return None
 
 
+def refuse_if_busy():
+    busy = active_run()
+    if busy:
+        sys.exit(f"FATAL: run {busy} is still running; wait for it (mkv-rip wait {busy}) "
+                 "before starting another, since two controllers would not share the stagger.")
+
+
 def cmd_list():
     runs = []
     for run_id in sorted(os.listdir(RUNS_ROOT)) if os.path.isdir(RUNS_ROOT) else []:
@@ -841,10 +856,7 @@ def cmd_start(plan_path):
         sys.exit(f"FATAL: bad plan {plan_path}: {exc}")
     mkvdev.write_makemkv_settings()
     staging_root()
-    busy = active_run()
-    if busy:
-        sys.exit(f"FATAL: run {busy} is still running; wait for it (mkv-rip wait {busy}) "
-                 "before starting another, since two controllers would not share the stagger.")
+    refuse_if_busy()
 
     run_id = time.strftime("%Y%m%d-%H%M%S") + "-" + secrets.token_hex(2)
     d = os.path.join(RUNS_ROOT, run_id)
@@ -984,6 +996,42 @@ def selftest():
                                    "titles_done": 0, "titles_total": None, "errors": []}]})
     assert view["health"] == {"dmesg_available": False, "paused": True, "pause_reason": "boom"}
     assert set(view) == {"run_id", "state", "started_at", "finished_at", "discs", "health"}
+    global RUNS_ROOT, pid_alive
+    real_alive = pid_alive
+    with tempfile.TemporaryDirectory() as tmp:
+        RUNS_ROOT = tmp
+        def mk(rid, state, pid):
+            os.makedirs(os.path.join(tmp, rid))
+            write_json(os.path.join(tmp, rid, "state.json"), {
+                "run_id": rid, "state": state, "started": "t0", "finished": None, "controller_pid": pid,
+                "health": {"dmesg": "ok", "paused_until": None, "events": []},
+                "discs": [{"index": 0, "serial": "S", "dest": "/d", "state": "scanning", "reason": None,
+                           "progress": None, "titles_done": 0, "titles_total": None, "errors": []}]})
+        pid_alive = lambda pid: pid == 111
+        mk("a-dead", "running", 222)
+        mk("b-done", "complete", 333)
+        assert active_run() is None, "a dead controller must not block new runs"
+        dead = load_status("a-dead")
+        assert dead["state"] == "incomplete" and dead["reason"] == "controller died"
+        assert dead["discs"][0]["state"] == "failed"
+        with open(os.path.join(tmp, "a-dead", "state.json")) as fh:
+            assert json.load(fh)["state"] == "incomplete", "verdict must be persisted"
+        mk("c-live", "running", 111)
+        assert active_run() == "c-live"
+        try:
+            refuse_if_busy()
+        except SystemExit as exc:
+            assert "c-live" in str(exc)
+        else:
+            raise AssertionError("a second run was allowed")
+        import io, contextlib
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            cmd_list()
+        listed = json.loads(buf.getvalue())
+        assert [r["run_id"] for r in listed] == ["a-dead", "b-done", "c-live"]
+        assert set(listed[0]) == {"run_id", "state", "started_at"}
+    RUNS_ROOT, pid_alive = os.environ.get("MKV_RIP_RUNS", "/work/rips"), real_alive
     print("selftest ok")
 
 
