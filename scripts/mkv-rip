@@ -130,17 +130,17 @@ def destination(entry):
     return os.path.join(*parts)
 
 
-def segment_title(entry, tnn):
-    """The MKV segment title that replaces MakeMKV's raw disc-label title.
+def segment_title(entry):
+    """The MKV segment title, matching what anime-normalize sets.
 
-    Final episode titles (SxxEyy - Name) belong to anime-normalize: the episode
-    mapping needs its dialogue verification, which a ripper cannot do.
+    This is the container title field of the MakeMKV GUI: the canonical series
+    name for every title on a series disc (episodes and extras alike), and
+    `Title (Year)` for a movie. Episode names live in filenames, which
+    anime-normalize assigns after verifying the order by dialogue.
     """
     if entry["category"] == "movies":
         return entry["title"]
-    # A hentai disc with no season has no "S" part to print.
-    season = f"S{entry['season']:02d} " if entry.get("season") is not None else ""
-    return f"{entry['series']} - {season}Disc {entry['disc']:02d} - t{tnn:02d}"
+    return entry["series"]
 
 
 def _int(value, what, lo, hi=None):
@@ -753,7 +753,7 @@ class Job(threading.Thread):
                 "duration_seconds": p.title_seconds(tid), "duration": a.get(9),
                 "size_bytes": int(a[11]) if a.get(11, "").isdigit() else None,
                 "source_playlist": a.get(16), "file_bytes": os.path.getsize(os.path.join(self.partial, fname)),
-                "file_seconds": round(secs, 3), "segment_title": segment_title(disc["plan"], tid)})
+                "file_seconds": round(secs, 3), "segment_title": segment_title(disc["plan"])})
         return {"plan": disc["plan"], "drive": disc["drive"], "makemkv": p.version,
                 "disc_label": p.disc.get(32) or p.disc.get(2), "titles": titles,
                 "errors": p.errors, "suspect_events": disc["suspect"],
@@ -945,13 +945,13 @@ def selftest():
 
     anime = {"serial": "S", "category": "anime", "series": "Fate/Zero", "season": 1, "disc": 2}
     assert destination(anime) == "/stage/anime/Fate - Zero/Season 01/Disc 02"
-    assert segment_title(anime, 3) == "Fate/Zero - S01 Disc 02 - t03"
+    assert segment_title(anime) == "Fate/Zero"
     hentai = {"serial": "S", "category": "hentai", "series": "X", "season": None, "disc": 1}
     assert destination(hentai) == "/stage/hentai/X/Disc 01"
-    assert segment_title(hentai, 0) == "X - Disc 01 - t00"
+    assert segment_title(hentai) == "X"
     movie = {"serial": "M", "category": "movies", "title": "Akira (1988)"}
     assert destination(movie) == "/stage/movies/Akira (1988)"
-    assert segment_title(movie, 0) == "Akira (1988)"
+    assert segment_title(movie) == "Akira (1988)"
 
     ok = validate_plan({"discs": [anime, movie]})
     assert ok["max_concurrent"] == 3 and ok["spinup_gap_seconds"] == 30

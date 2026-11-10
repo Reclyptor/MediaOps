@@ -594,9 +594,11 @@ failure is recorded on the disc but does not fail a verified rip.
 manifest, for a human to judge — a USB reset mid-rip is not something to promote
 automatically.
 
-**Titles.** Series segment titles are `<Series> - S<XX> Disc <XX> - t<NN>` (no
-`S<XX>` when a hentai disc has `season: null`); movies are `<Title (Year)>`. Final
-`SxxEyy - Name` titles stay with anime-normalize. Only `/` is sanitised in
+**Titles.** Segment titles follow anime-normalize, so a ripped disc needs no
+retitling there: every title on a series disc (episodes and extras) gets the
+canonical series name, and a movie gets `<Title (Year)>`. This is the container
+title field of the MakeMKV GUI. Episode names stay with anime-normalize, which
+puts them in filenames once the order is verified by dialogue. Only `/` is sanitised in
 directory names, to ` - `; segment titles are never altered.
 
 The run is `complete` only when every disc is `done`; otherwise `incomplete`, with
