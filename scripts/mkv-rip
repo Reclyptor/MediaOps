@@ -5,6 +5,9 @@ usage: mkv-rip PLAN.json            start a run detached; prints its run id
        mkv-rip status RUN_ID        JSON: per-disc state, progress, errors
        mkv-rip wait RUN_ID          block until the run is terminal
        mkv-rip list                 every run: id, state, start time
+       mkv-rip finalize RUN_ID [--dry-run]
+                                    re-verify a run's failed discs that are still
+                                    in their drives, and promote the good ones
        mkv-rip --selftest           parser / scheduler / verifier fixtures
 
 plan: {"discs": [{"serial": "BP52...", "category": "anime", "series": "Name",
@@ -32,10 +35,11 @@ A run is `complete` only when every disc is `done`; otherwise `incomplete`.
 
 Title lengths come from a separate pre-pass: `mkv` mode prints no TINFO lines, so
 each disc is first read with `makemkvcon info` (same scanning slot), and the rip
-is checked against that table. See SPEC.md section 10 for why.
+is checked against that table. See SPEC.md section 10 for why, and for `finalize`.
 """
 import collections
 import datetime
+import fcntl
 import json
 import os
 import re
@@ -1012,6 +1016,111 @@ def cmd_wait(run_id):
         time.sleep(5)
 
 
+# ----------------------------------------------------------------- finalize
+
+def recorded_rc(disc, parser):
+    """makemkvcon's exit status for a finished rip, or None when it cannot be known.
+
+    Runs from before the title info pass stored no status. For those, a log whose
+    last copy-complete line (MSG 5005) reports no failed titles, with no fatal
+    message, stands in for a clean exit; anything else stays unknown, and unknown
+    fails verification.
+    """
+    if disc.get("makemkv_rc") is not None:
+        return disc["makemkv_rc"]
+    if parser.saved is not None and parser.failed == 0 and not parser.fatal:
+        return 0
+    return None
+
+
+def finalize_plan(st, run_path, drive_list):
+    """-> (todo, skipped): which failed discs `finalize` would re-verify, and why
+    the others are left alone. Reads only; spins nothing up.
+
+    A disc qualifies when its .partial and rip log are still there, its drive
+    holds media and links at 480, and the rip itself finished cleanly. A rip
+    that is known to have died has nothing to re-verify, so its disc is not
+    spun up for nothing.
+    """
+    by_serial = {d["serial"]: d for d in drive_list}
+    todo, skipped = [], []
+    for disc in st["discs"]:
+        if disc["state"] != "failed":
+            continue
+        who = {"index": disc["index"], "serial": disc["serial"]}
+        log_path = os.path.join(run_path, f"disc-{disc['index']:02d}.log")
+        drive = by_serial.get(disc["serial"])
+        if not os.path.isdir(disc["dest"] + ".partial"):
+            why = f"no {disc['dest']}.partial to verify"
+        elif not os.path.isfile(log_path):
+            why = f"the rip log {log_path} is missing"
+        elif drive is None:
+            why = "its drive is not on the USB bus"
+        elif not drive["media"]:
+            why = f"no disc in the drive (tray {drive['tray']}, state {drive['status']})"
+        elif drive["link_mbps"] != 480:
+            why = f"link is {drive['link_mbps']} Mbit/s, not 480"
+        else:
+            parser = parse_log(log_path)
+            rc = recorded_rc(disc, parser)
+            if rc is None:
+                why = "no recorded exit status, and the rip log has no clean copy-complete line"
+            elif rc != 0:
+                why = f"makemkvcon exited {rc}"
+            else:
+                todo.append({**who, "disc": disc, "drive": drive, "parser": parser, "rc": rc})
+                continue
+        skipped.append({**who, "reason": why})
+    return todo, skipped
+
+
+def finalize_disc(run, item):
+    disc, drive, parser, rc = item["disc"], item["drive"], item["parser"], item["rc"]
+    min_len = run.cfg["min_title_seconds"]
+    disc["drive"] = {k: drive[k] for k in ("dev", "sg", "usb_port", "link_mbps")}
+    disc["makemkv_rc"] = rc
+    info = RobotParser()
+    info_rc = run_makemkvcon(info_command(drive["dev"], min_len),
+                             os.path.join(run.dir, f"disc-{disc['index']:02d}.info.log"), info,
+                             timeout=run.cfg["scan_timeout_seconds"])
+    parser.take_info(info, info_rc)
+    parser.check_announced()
+    finish_disc(run, disc, parser, rc)
+
+
+def cmd_finalize(run_id, dry_run):
+    busy = active_run()
+    if busy:
+        sys.exit(f"FATAL: run {busy} is still running; finalize re-verifies finished runs only, "
+                 "and a second reader of the drives would break the stagger.")
+    st = load_status(run_id)
+    st.pop("controller_alive")
+    run = Run(run_id, st)
+    todo, skipped = finalize_plan(st, run.dir, mkvdev.drives())
+    if dry_run:
+        print(json.dumps({"would_finalize": [{k: t[k] for k in ("index", "serial")} for t in todo],
+                          "skipped": skipped}, indent=1))
+        return
+    lock = open(os.path.join(run.dir, "finalize.lock"), "w")
+    try:
+        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        sys.exit(f"FATAL: another finalize of {run_id} is in progress.")
+    mkvdev.write_makemkv_settings()
+    for n, item in enumerate(todo):
+        if n:
+            time.sleep(run.cfg["spinup_gap_seconds"])    # one drive spinning up at a time
+        try:
+            finalize_disc(run, item)
+        except Exception as exc:                          # noqa: BLE001 -- the next disc still deserves its turn
+            run.set_state(item["disc"], "failed", f"internal error during finalize: {exc!r}")
+    run.conclude()
+    out = status_view(run.state)
+    out["skipped"] = skipped
+    print(json.dumps(out, indent=1))
+    sys.exit(0 if run.state["state"] == "complete" else 1)
+
+
 # ----------------------------------------------------------------- selftest
 
 # Trimmed from a real disc (Parallel World Pharmacy D1, 2026-11-09): the `mkv` run prints only the
@@ -1272,6 +1381,119 @@ def selftest():
     assert any("fatal error: Failed to open disc" in b for b in gone.info_problems)
     assert any("announces no titles" in b for b in (lambda r: (r.take_info(parsed(INFO_LOG), 0), r.check_announced(), r.info_problems)[2])(RobotParser()))
 
+    # ---- legacy runs stored no exit status: infer it from the log, conservatively
+    assert recorded_rc({"makemkv_rc": 3}, rip) == 3 and recorded_rc({"makemkv_rc": 0}, parsed([])) == 0
+    assert recorded_rc({}, parsed(RIP_LOG)) == 0
+    assert recorded_rc({}, parsed(RIP_LOG[:-1])) is None, "no copy-complete line: unknown"
+    assert recorded_rc({}, parsed(RIP_LOG + ['MSG:5004,0,0,"Copy complete. 10 titles saved, 1 failed.","fmt","10","1"'])) is None
+    assert recorded_rc({}, parsed(RIP_LOG + ['MSG:5010,0,1,"Failed to open disc","fmt"'])) is None
+
+    # ---- finalize: refuses while a run is running; plans only what can be re-verified
+    with tempfile.TemporaryDirectory() as tmp:
+        RUNS_ROOT = os.path.join(tmp, "runs")
+        os.makedirs(os.path.join(RUNS_ROOT, "live"))
+        pid_alive = lambda pid: True
+        write_json(os.path.join(RUNS_ROOT, "live", "state.json"), {
+            "run_id": "live", "state": "running", "started": "t", "finished": None, "controller_pid": 1,
+            "health": {"dmesg": "ok", "paused_until": None, "events": []}, "discs": []})
+        try:
+            cmd_finalize("live", False)
+        except SystemExit as exc:
+            assert "still running" in str(exc) and "live" in str(exc)
+        else:
+            raise AssertionError("finalize ran against a running run")
+        pid_alive = real_alive
+
+        rd = os.path.join(tmp, "plan-run")
+        os.makedirs(rd)
+
+        def planned(i, state="failed", partial=True, log=RIP_LOG, rc=None):
+            dest = os.path.join(tmp, "stage", f"d{i}")
+            if partial:
+                os.makedirs(dest + ".partial")
+            if log is not None:
+                with open(os.path.join(rd, f"disc-{i:02d}.log"), "w") as fh:
+                    fh.write("\n".join(log))
+            return {"index": i, "serial": f"S{i}", "state": state, "dest": dest, "makemkv_rc": rc}
+
+        st = {"discs": [planned(0), planned(1, partial=False), planned(2), planned(3, log=RIP_LOG[:-1]),
+                        planned(4, rc=1), planned(5, state="done"), planned(6), planned(7, log=RIP_LOG[:-1], rc=0),
+                        planned(8, log=None), planned(9)]}
+        drive = lambda i, **kw: {"serial": f"S{i}", "dev": f"/dev/sr{i}", "sg": None, "usb_port": f"5-{i}",
+                                 "link_mbps": 480, "tray": "closed", "media": True, "status": "disc_ok", **kw}
+        fleet = [drive(0), drive(1), drive(2, link_mbps=12), drive(3), drive(4), drive(5), drive(7),
+                 drive(8), drive(9, media=False, tray="open", status="no_disc")]
+        todo, skipped = finalize_plan(st, rd, fleet)
+        assert [t["index"] for t in todo] == [0, 7] and all(t["rc"] == 0 for t in todo)
+        why = {k["index"]: k["reason"] for k in skipped}
+        assert sorted(why) == [1, 2, 3, 4, 6, 8, 9], why
+        assert ".partial" in why[1] and "12 Mbit/s" in why[2] and "clean copy-complete" in why[3]
+        assert "exited 1" in why[4] and "not on the USB bus" in why[6] and "log" in why[8] and "no disc" in why[9]
+
+    # ---- finalize end to end against a fake makemkvcon: the shared tail promotes a good disc
+    # and keeps a mismatched one failed
+    import contextlib, io, stat
+    for scenario, info_lines in (("matching", INFO_LOG), ("mismatched", swapped)):
+        with tempfile.TemporaryDirectory() as tmp:
+            RUNS_ROOT = os.path.join(tmp, "runs")
+            rd = os.path.join(RUNS_ROOT, "e2e")
+            os.makedirs(rd)
+            dest = os.path.join(tmp, "stage", "anime", "X", "Disc 01")
+            os.makedirs(dest + ".partial")
+            for name in disk:
+                open(os.path.join(dest + ".partial", name), "w").close()
+            with open(os.path.join(rd, "disc-00.log"), "w") as fh:
+                fh.write("\n".join(RIP_LOG) + "\n")
+            with open(os.path.join(tmp, "info.txt"), "w") as fh:
+                fh.write("\n".join(info_lines) + "\n")
+            bindir = os.path.join(tmp, "bin")
+            os.makedirs(bindir)
+            for tool, body in (("makemkvcon", 'cat "$FAKE_INFO"'), ("mkvpropedit", "exit 0")):
+                with open(os.path.join(bindir, tool), "w") as fh:
+                    fh.write(f"#!/bin/sh\n{body}\n")
+                os.chmod(os.path.join(bindir, tool), 0o755)
+            plan = {"discs": [{"serial": "S0", "category": "anime", "series": "X", "season": None, "disc": 1}],
+                    "min_title_seconds": 60, "max_concurrent": 1, "spinup_gap_seconds": 0,
+                    "health_pause_seconds": 1, "scan_timeout_seconds": 60}
+            write_json(os.path.join(rd, "plan.json"), plan)
+            write_json(os.path.join(rd, "state.json"), {
+                "run_id": "e2e", "state": "incomplete", "started": "t", "finished": "t", "controller_pid": 1,
+                "health": {"dmesg": "ok", "paused_until": None, "events": []},
+                "discs": [{"index": 0, "serial": "S0", "plan": plan["discs"][0], "dest": dest, "state": "failed",
+                           "reason": "not a title makemkvcon reported", "drive": None, "progress": None,
+                           "started": "t", "copy_started": "t", "finished": "t", "suspect": [], "titles": None,
+                           "eject": None, "titles_done": 0, "titles_total": None, "errors": []}]})
+            ejected, real_env = [], dict(os.environ)
+            seconds = {n: s_ for n, s_ in disk.items()}
+            real = (duration, mkvdev.drives, mkvdev.eject, mkvdev.write_makemkv_settings)
+            duration = lambda path: seconds[os.path.basename(path)] / 60
+            mkvdev.drives = lambda: [drive(0)]
+            mkvdev.eject = ejected.append
+            mkvdev.write_makemkv_settings = lambda: None
+            os.environ.update(PATH=bindir + os.pathsep + os.environ["PATH"], FAKE_INFO=os.path.join(tmp, "info.txt"))
+            try:
+                with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+                    try:
+                        cmd_finalize("e2e", False)
+                    except SystemExit as exc:
+                        code = exc.code
+            finally:
+                duration, mkvdev.drives, mkvdev.eject, mkvdev.write_makemkv_settings = real
+                os.environ.clear()
+                os.environ.update(real_env)
+            with open(os.path.join(rd, "state.json")) as fh:
+                final = json.load(fh)
+            d0 = final["discs"][0]
+            if scenario == "matching":
+                assert code == 0 and final["state"] == "complete" and final["problems"] == []
+                assert d0["state"] == "done" and d0["reason"] is None and d0["makemkv_rc"] == 0 and d0["eject"] == "ok"
+                assert os.path.isfile(os.path.join(dest, "manifest.json")) and not os.path.exists(dest + ".partial")
+                assert len(ejected) == 1 and d0["titles_total"] == 11 and d0["titles"] == 11
+            else:
+                assert code == 1 and final["state"] == "incomplete" and d0["state"] == "failed"
+                assert "title 3 is 00012.mpls in the rip but 00099.mpls" in d0["reason"]
+                assert os.path.isdir(dest + ".partial") and not os.path.exists(dest) and not ejected
+            assert os.path.isfile(os.path.join(rd, "disc-00.info.log"))
     RUNS_ROOT = os.environ.get("MKV_RIP_RUNS", "/work/rips")
     print("selftest ok")
 
@@ -1288,6 +1510,8 @@ def main():
         cmd_status(args[1])
     elif len(args) == 2 and args[0] == "wait":
         cmd_wait(args[1])
+    elif len(args) in (2, 3) and args[0] == "finalize" and args[2:] in ([], ["--dry-run"]):
+        cmd_finalize(args[1], bool(args[2:]))
     elif len(args) == 1 and not args[0].startswith("-"):
         cmd_start(args[0])
     else:
