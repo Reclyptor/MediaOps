@@ -135,6 +135,7 @@ mkv-drives                       # what is in the bays, and at what link speed
 mkv-rip plan.json                # prints a run id; the rip survives a dropped exec
 mkv-rip status <run-id>          # per-disc state and progress
 mkv-rip wait <run-id>            # blocks; exits 0 only if every disc is done
+mkv-rip list                     # every run; a new run is refused while one is running
 ```
 
 Rips land in `$MEDIA_ROOT/dxp6800/_pending/` as `<dest>.partial/` and are renamed into

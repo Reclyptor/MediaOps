@@ -530,7 +530,8 @@ holding media, so it is opt-in.
 
 ### `mkv-rip`
 
-`mkv-rip plan.json` validates the plan, writes the key settings, and starts a
+`mkv-rip plan.json` refuses to start while another run is `running` (it names that run),
+then validates the plan, writes the key settings, and starts a
 controller detached in its own session (`setsid(2)`), so a dropped `kubectl exec`
 does not kill a rip. State lives in `/work/rips/<run-id>/`: `state.json`,
 `plan.json`, `controller.log`, and a raw `disc-NN.log` of makemkvcon output per
@@ -538,6 +539,15 @@ disc. `status` prints the state; `wait` blocks until the run is `complete` or
 `incomplete` and exits 0 only for `complete`. If the controller dies without a
 verdict (pod restart), `status` reports the run `incomplete` rather than `running`
 forever.
+
+`status` and `wait` print `{run_id, state, started_at, finished_at, discs: [{serial,
+dest, state, reason, progress: {phase, current, total}, titles_done, titles_total,
+errors}], health: {dmesg_available, paused, pause_reason}}`, where `reason` is a
+sentence for every blocked, failed and suspect disc. `mkv-rip list` prints every run
+as `{run_id, state, started_at}`. The validated plan is copied to
+`/work/rips/<run-id>/plan.json`, so the caller's path stops mattering. A planned
+serial missing from sysfs is `blocked` with a reason saying the drive has fallen off
+the bus and needs the hub reset.
 
 **Pre-flight** blocks a disc, with a reason, if its serial is unknown, it has no
 media, its link is not 480 Mbit/s, or its destination (or a `.partial` of it)
