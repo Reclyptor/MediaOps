@@ -9,6 +9,7 @@ import fcntl
 import os
 import re
 import subprocess
+import time
 
 import mkvlib  # noqa: F401  -- sets the umask; settings.conf and rips must honour it
 
@@ -127,22 +128,49 @@ def drives():
 
 
 def eject(drive):
-    """Open the tray. ioctl first (no subprocess), sg_start as the fallback."""
+    """Open the tray, and prove it opened.
+
+    makemkvcon leaves PREVENT MEDIUM REMOVAL set on the drive. With that lock on,
+    CDROMEJECT still returns success while the BP60NB10 ignores it, so a return
+    code proves nothing: the tray state is what counts. Release the lock, eject,
+    then read the drive's status back. The sg path (ALLOW MEDIUM REMOVAL, then
+    START STOP UNIT) is the fallback when the ioctl route leaves it closed.
+    """
+    tried = []
+    if drive.get("sg"):
+        r = subprocess.run(["sg_prevent", "--allow", drive["sg"]], capture_output=True, text=True)
+        if r.returncode != 0:
+            tried.append(f"sg_prevent: {(r.stderr or r.stdout).strip()[:120]}")
     try:
         fd = os.open(drive["dev"], os.O_RDONLY | os.O_NONBLOCK)
         try:
             fcntl.ioctl(fd, CDROMEJECT, 0)
         finally:
             os.close(fd)
-        return
     except OSError as exc:
-        first = f"{drive['dev']}: {exc.strerror}"
+        tried.append(f"{drive['dev']}: {exc.strerror}")
+    if _tray_opened(drive):
+        return
+    tried.append("CDROMEJECT left the tray closed")
     if drive.get("sg"):
         r = subprocess.run(["sg_start", "--eject", drive["sg"]], capture_output=True, text=True)
-        if r.returncode == 0:
+        if r.returncode != 0:
+            tried.append(f"sg_start: {(r.stderr or r.stdout).strip()[:120]}")
+        if _tray_opened(drive):
             return
-        first += f"; sg_start: {(r.stderr or r.stdout).strip()[:120]}"
-    raise OSError(first)
+    raise OSError("; ".join(tried))
+
+
+def _tray_opened(drive, timeout=5.0):
+    """True once the drive reports its tray open (or empty), within `timeout`."""
+    deadline = time.monotonic() + timeout
+    while True:
+        status, _ = drive_status(drive["dev"], drive.get("sg"))
+        if status in ("tray_open", "no_disc"):
+            return True
+        if time.monotonic() >= deadline:
+            return False
+        time.sleep(0.5)
 
 
 def split_fields(s):
