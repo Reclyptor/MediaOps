@@ -598,7 +598,10 @@ automatically.
 retitling there: every title on a series disc (episodes and extras) gets the
 canonical series name, and a movie gets `<Title (Year)>`. This is the container
 title field of the MakeMKV GUI. Episode names stay with anime-normalize, which
-puts them in filenames once the order is verified by dialogue. Only `/` is sanitised in
+puts them in filenames once the order is verified by dialogue.
+A film that ships in a series box set is planned with the series, `season: null`
+and its own `container_title` (`Series: Film (Year)`), which lands it at
+`<category>/<Series>/Disc XX/` titled as a movie. Only `/` is sanitised in
 directory names, to ` - `; segment titles are never altered.
 
 The run is `complete` only when every disc is `done`; otherwise `incomplete`, with

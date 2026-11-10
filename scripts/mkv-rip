@@ -53,7 +53,7 @@ CATEGORIES = ("anime", "tv", "hentai", "movies")
 SERIES_CATEGORIES = ("anime", "tv", "hentai")
 DEFAULTS = {"min_title_seconds": 60, "max_concurrent": 3, "spinup_gap_seconds": 30,
             "health_pause_seconds": 120, "scan_timeout_seconds": 900}
-DISC_KEYS = {"serial", "category", "series", "season", "disc", "title"}
+DISC_KEYS = {"serial", "category", "series", "season", "disc", "title", "container_title"}
 
 TERMINAL_DISC = ("done", "failed", "blocked", "suspect")
 TERMINAL_RUN = ("complete", "incomplete")
@@ -140,7 +140,10 @@ def segment_title(entry):
     """
     if entry["category"] == "movies":
         return entry["title"]
-    return entry["series"]
+    # A film that ships inside a series box set is filed with the series, but
+    # its container title is the film's own (`Series: Film (Year)`), as
+    # anime-normalize titles movie files.
+    return entry.get("container_title") or entry["series"]
 
 
 def _int(value, what, lo, hi=None):
@@ -177,14 +180,20 @@ def validate_plan(plan):
             if e["category"] in SERIES_CATEGORIES:
                 _component(e.get("series"), "series")
                 _int(e.get("disc"), "disc", 1)
+                if "container_title" in e and (not isinstance(e["container_title"], str)
+                                               or not e["container_title"].strip()):
+                    raise ValueError("container_title must be a non-empty string")
                 if e.get("season") is None:
-                    if e["category"] != "hentai":
-                        raise ValueError("season is required (only hentai may use null)")
+                    # A season-less disc is either hentai or a film filed with its
+                    # series, which says so by carrying its own container title.
+                    # Anything else is a forgotten season, caught before a spin-up.
+                    if e["category"] != "hentai" and "container_title" not in e:
+                        raise ValueError("season is required (null only for hentai, or a film disc with container_title)")
                 else:
                     _int(e["season"], "season", 0)
             else:
                 _component(e.get("title"), "title")
-                extra = {"series", "season", "disc"} & set(e)
+                extra = {"series", "season", "disc", "container_title"} & set(e)
                 if extra:
                     raise ValueError(f"{sorted(extra)} do not apply to movies")
         except ValueError as exc:
@@ -952,6 +961,17 @@ def selftest():
     movie = {"serial": "M", "category": "movies", "title": "Akira (1988)"}
     assert destination(movie) == "/stage/movies/Akira (1988)"
     assert segment_title(movie) == "Akira (1988)"
+    film = {"serial": "F", "category": "anime", "series": "Revue Starlight", "season": None,
+            "disc": 3, "container_title": "Revue Starlight: The Movie (2021)"}
+    assert destination(film) == "/stage/anime/Revue Starlight/Disc 03"
+    assert segment_title(film) == "Revue Starlight: The Movie (2021)"
+    validate_plan({"discs": [film]})
+    for bad_film in ({**film, "container_title": " "}, {**movie, "container_title": "x"}):
+        try:
+            validate_plan({"discs": [bad_film]})
+            raise AssertionError("accepted a bad container_title")
+        except ValueError:
+            pass
 
     ok = validate_plan({"discs": [anime, movie]})
     assert ok["max_concurrent"] == 3 and ok["spinup_gap_seconds"] == 30
