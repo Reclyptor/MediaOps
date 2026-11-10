@@ -58,8 +58,12 @@ by convention — it is unrepresentable.
 | `mkv-dupcheck DIR TRACK` | is a track an alternate cut of another, or distinct content? |
 | `mkv-titlescan FILE OUT START END [STEP] [BAND]` | hunt for an episode title card |
 | `mkv-staticcheck FILE...` | is this a real extra, or a disc menu / logo card? |
+| `mkv-drives [--labels]` | one JSON line per optical drive: serial, USB port, link speed, tray/media |
+| `mkv-rip PLAN.json` / `status ID` / `wait ID` | staggered disc ripping into `_pending`, verified, with a manifest |
 
-Every mutating tool is **dry-run by default** and needs `--go` to act.
+Every mutating tool is **dry-run by default** and needs `--go` to act. The exception is
+`mkv-rip`, which only ever writes new `.partial` directories and refuses to touch an
+existing destination.
 
 Also on `PATH`: `mkvmerge`, `mkvpropedit`, `mkvinfo`, `mkvextract`, `ffmpeg`,
 `ffprobe`, `mediainfo`, `montage`, `python3`, `jq`, `rsync`.
@@ -108,6 +112,39 @@ OP, so filing by runtime alone puts them in `Extras/`. A menu card is a *still* 
 Check what a disc's short tracks actually *are* before filing them. On one pass this
 caught three Funimation trailers for entirely unrelated shows sitting inside a series'
 Extras folder.
+
+## Ripping discs
+
+`makemkvcon` is built into the image (a self-contained glibc bundle under
+`/opt/makemkv`, since the image itself is musl), and `mkv-drives` / `mkv-rip` drive
+the eight BP60NB10 drives on `styxeon`.
+
+**The pod must be privileged** to see `/dev/sr*` and `/dev/sg*`, with `cdrom` (24) in
+`supplementalGroups`. It still runs as uid 3000. Unprivileged, `mkv-drives` can still
+read serials and link speeds from sysfs, but it cannot read tray or media state and
+`mkv-rip` will block every disc.
+
+The drives share one powered USB 2.0 hub tree, and spinning several up at once has
+knocked drives off the bus. So `mkv-rip` is a controller, not a loop: one drive scans
+at a time, the next waits `spinup_gap_seconds` after the previous one starts copying,
+and any USB error pauses new starts. A drive whose link is not 480 Mbit/s is blocked
+before it spins up — the fix for that needs root on the node.
+
+```bash
+mkv-drives                       # what is in the bays, and at what link speed
+mkv-rip plan.json                # prints a run id; the rip survives a dropped exec
+mkv-rip status <run-id>          # per-disc state and progress
+mkv-rip wait <run-id>            # blocks; exits 0 only if every disc is done
+```
+
+Rips land in `$MEDIA_ROOT/dxp6800/_pending/` as `<dest>.partial/` and are renamed into
+place only after the run passes: makemkvcon exit 0, no read errors, every file's
+duration within 2% of what MakeMKV reported. A `manifest.json` records every title, so
+classification can read it instead of re-probing. The plan format and the full rules
+are in [`SPEC.md` §10](SPEC.md#10-disc-ripping-mkv-drives-and-mkv-rip).
+
+The licence key arrives as `$MAKEMKV_KEY` and is written to `$HOME/.MakeMKV/` on the
+`/work` emptyDir. It never touches the NAS.
 
 ## The one thing to remember
 

@@ -90,6 +90,9 @@ is a stream-copy/probe utility with no heavy runtime.
 | `rsync` | verified copies; `--remove-source-files` only ever under M3 |
 | `mediainfo` | second opinion on container metadata when `ffprobe` is ambiguous |
 | `tzdata` | timestamps in logs match everything else (`America/Chicago`) |
+| `sg3_utils` | `sg_start --eject` and `sg_turs`: tray and media probes that never spin a disc (§10) |
+| `lsscsi` | cross-checking the sr/sg pairing when sysfs is ambiguous |
+| `util-linux-misc` | `setsid` and `dmesg`: a rip must survive a dropped `kubectl exec`, and the health watch reads the kernel log when it is allowed to |
 
 ### User
 
@@ -110,6 +113,8 @@ backlog and are the reason this is an image and not just a package list:
 | `mkv-split` | drive `mkvmerge --split`, then verify part count, per-part duration and total-bytes-vs-source |
 | `mkv-promote` | manifest-driven mover with full accounting (see §5) |
 | `mkv-archive` | archive-before-promote into `$ARCHIVE_ROOT/<path within its share>`, preserving the layout the file had |
+| `mkv-drives` | one JSON line per optical drive: serial, device nodes, USB port, link speed, tray/media state (§10) |
+| `mkv-rip` | staggered, health-gated disc ripping into `_pending` with verification and a manifest (§10) |
 
 **Split of responsibility:** stable tooling is baked into the image; *working
 state* — the split manifest, the content-verified corrections, run logs — lives
@@ -456,3 +461,136 @@ call. The labels still rendered, which is precisely the hazard — pages of beni
 noise are what a real error hides in. The image gives `media` no home directory,
 so the deployment now sets `HOME=/work` and `XDG_CACHE_HOME=/work/.cache` against
 the existing emptyDir. Zero errors after the change.
+
+---
+
+## 10. Disc ripping: `mkv-drives` and `mkv-rip`
+
+Added 2026-11-09. Before this, every rip went through the MakeMKV web GUI by
+hand, one pod per drive, each scanning whatever disc it noticed.
+
+### Why it is staggered
+
+The eight BP60NB10 drives on `styxeon` share one powered USB 2.0 hub tree
+(`usb5` → `5-1`). Spinning several up together has knocked drives off the bus:
+at boot on 2026-11-09 the `34d1:0609` sub-hub at `5-1.2` threw `error -71` and
+its three drives fell to 12 Mbit/s. There is no power sensor to ask — the hubs
+report no current and `over_current_count` reads 0 everywhere — so the gating is
+done in software, from MakeMKV's progress and from what the USB tree reports.
+
+### MakeMKV in the image
+
+`makemkvcon` is closed-source and glibc-only; the image is musl. The Dockerfile
+therefore has a `debian:12` builder stage (the approach `jlesage/docker-makemkv`
+uses): build `makemkv-oss` as libraries only (`--disable-gui`), unpack
+`makemkv-bin`, accept its EULA non-interactively, copy in the glibc runtime and
+every shared library `ldd` reports, and `patchelf` each ELF so its interpreter and
+rpath point at `/opt/makemkv/lib`. The Alpine stage copies that tree in whole.
+
+- The version and the sha256 of both tarballs (and of the ffmpeg source) are build
+  args. A changed tarball fails the build rather than shipping.
+- `libmakemkv` links `libavcodec` unconditionally, but only its audio-conversion
+  path uses it and a rip never converts. A minimal static ffmpeg (no programs, no
+  autodetected libraries) satisfies the link without bundling ~100 codec libraries.
+- A build-time smoke test runs `makemkvcon -r info disc:9999` and requires the
+  `MSG:1005` banner. It exits cleanly with no drives, so it proves the patched
+  loader and every bundled library resolve on musl and that the EULA was accepted.
+- MakeMKV 2.0.0 is currently labelled a beta on makemkv.com. A purchased key is
+  unaffected by beta expiry, but a bump to a stable release should be taken when
+  one appears.
+
+### Privilege
+
+The pod must be **privileged** to see `/dev/sr*` and `/dev/sg*`, and pinned to
+`styxeon`. It still runs as uid 3000; privilege exposes the device nodes and
+grants a non-root process no capabilities, so root-owned media stays
+unrepresentable (M5). `supplementalGroups` must include 24 (`cdrom`), which owns
+the drive nodes. Group 6 (`disk`) must not be added.
+
+Unprivileged, `mkv-drives` still resolves every serial and link speed from sysfs
+but reports `tray`/`media` as `null` with an `error`, and `mkv-rip` blocks every
+disc rather than guess.
+
+The key reaches `makemkvcon` as `$MAKEMKV_KEY` (a Secret). `mkv-rip` and
+`mkv-drives --labels` write `$HOME/.MakeMKV/settings.conf` from it with mode 600
+and `app_DataDir=/work/makemkv`. `HOME` is the `/work` emptyDir, so the key never
+touches the NAS and is never logged.
+
+### `mkv-drives`
+
+Prints one JSON object per drive. It reads `/sys` and asks each drive for its tray
+state with `CDROM_DRIVE_STATUS` on a non-blocking fd, which does not spin a disc up
+and is safe at any time. `sg_turs` on the sg node is the fallback when the sr node
+is not visible. The USB device behind a drive is the nearest ancestor of
+`/sys/class/block/srN/device` holding both `serial` and `speed`; its basename is
+`usb_port` and its `speed` is `link_mbps`. `status` carries the raw state, because
+`not_ready` (a drive still becoming ready after a disc goes in) is not `no_disc`.
+`--labels` adds `label` from makemkvcon's drive list, which touches every drive
+holding media, so it is opt-in.
+
+### `mkv-rip`
+
+`mkv-rip plan.json` validates the plan, writes the key settings, and starts a
+controller detached in its own session (`setsid(2)`), so a dropped `kubectl exec`
+does not kill a rip. State lives in `/work/rips/<run-id>/`: `state.json`,
+`plan.json`, `controller.log`, and a raw `disc-NN.log` of makemkvcon output per
+disc. `status` prints the state; `wait` blocks until the run is `complete` or
+`incomplete` and exits 0 only for `complete`. If the controller dies without a
+verdict (pod restart), `status` reports the run `incomplete` rather than `running`
+forever.
+
+**Pre-flight** blocks a disc, with a reason, if its serial is unknown, it has no
+media, its link is not 480 Mbit/s, or its destination (or a `.partial` of it)
+already exists. It is checked when the run starts and again just before each disc
+spins up. Nothing is ever overwritten.
+
+**Rips** run `makemkvcon -r --noscan --progress=-same --minlength=<s> mkv
+dev:/dev/srN all <dest>.partial`. `--noscan` stops makemkvcon from touching every
+other drive during its startup drive scan, which would defeat the stagger.
+
+**Staggering.** A start needs all of: fewer than `max_concurrent` rips running;
+no drive in `scanning`; `spinup_gap_seconds` since the previous drive left
+`scanning`; and no health pause. `scanning` becomes `ripping` on the progress
+text, not the numeric codes: a `PRGC` named `Saving to MKV file` under a `PRGT`
+beginning `Saving`. The `Opening ... disc` PRGCs (`Scanning contents`, `Processing
+AV clips`, `Processing BD+ code`, `Loading playlists`) and `Analyzing seamless
+segments` are all still analysis — the drive is not yet streaming — so they keep
+the slot held. A disc stuck scanning past `scan_timeout_seconds` (900) is killed
+so it cannot starve the run.
+
+**Health watch.** Primarily sysfs, because `dmesg` is normally unreadable for uid
+3000 (`dmesg_restrict`): a drive's link speed dropping, its USB device
+disappearing, or its sr node disappearing is an event. New kernel lines naming a
+port on the same USB bus (`error -71`, `USB disconnect`, `reset ...-speed USB
+device`, `device descriptor read`, `new full-speed`, `over-current`) are events
+too, when `dmesg` is readable; `status` says `health.dmesg: unavailable: ...`
+when it is not. Any event pauses new starts for `health_pause_seconds` (120). An
+event on a port that is, or is an ancestor of, a running drive's port marks that
+disc `suspect`.
+
+**Success** needs all of: makemkvcon exits 0; no read/write-error MSG lines (those
+whose format is `Error '%1' occurred while ...`, a SCSI error, `Failed to save
+title`, or corrupt-source and hash-check messages); no failed titles in
+makemkvcon's own tally; at least one `.mkv`; every file mapped to a reported title
+with an ffprobe duration within 2% of that title's reported length (floor of 2 s,
+since reported lengths are whole seconds); and every reported title of at least
+`min_title_seconds` present as a file. Then segment titles are set with
+`mkvpropedit`, `manifest.json` is written, `.partial` is renamed into place, and
+the tray is ejected (`CDROMEJECT`; `sg_start --eject` as the fallback). An eject
+failure is recorded on the disc but does not fail a verified rip.
+
+**Failure** leaves the `.partial` folder for inspection and reports why. A
+`suspect` disc whose rip otherwise verifies is also left as `.partial`, with its
+manifest, for a human to judge — a USB reset mid-rip is not something to promote
+automatically.
+
+**Titles.** Series segment titles are `<Series> - S<XX> Disc <XX> - t<NN>` (no
+`S<XX>` when a hentai disc has `season: null`); movies are `<Title (Year)>`. Final
+`SxxEyy - Name` titles stay with anime-normalize. Only `/` is sanitised in
+directory names, to ` - `; segment titles are never altered.
+
+The run is `complete` only when every disc is `done`; otherwise `incomplete`, with
+a `problems` list of the discs that are not.
+
+`mkv-rip --selftest` runs fixtures for the robot parser, the destination and title
+formats, the verifier, the health attribution and the start gate, with no hardware.
