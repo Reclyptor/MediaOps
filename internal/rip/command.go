@@ -3,7 +3,6 @@ package rip
 import (
 	"context"
 	"errors"
-	"flag"
 	"fmt"
 	"io"
 	"os"
@@ -78,11 +77,11 @@ func (d Deps) cmdStart(ctx context.Context, args []string, streams cli.IO) error
 
 func (d Deps) cmdIdentify(ctx context.Context, args []string, streams cli.IO) error {
 	req := identifyRequest{}
-	fs := newFlagSet("identify")
+	fs := cli.NewFlagSet("identify")
 	fs.IntVar(&req.MinTitleSeconds, "min-title-seconds", 60, "")
 	fs.IntVar(&req.SpinupGapSeconds, "spinup-gap-seconds", 30, "")
 	fs.IntVar(&req.ScanTimeoutSeconds, "scan-timeout-seconds", 900, "")
-	serials, err := parseFlags(fs, args)
+	serials, err := cli.ParseFlags(fs, args)
 	if err != nil {
 		return cli.Usage(fmt.Errorf("identify: %w; usage: mkv-rip identify [SERIAL...] [--min-title-seconds N] [--spinup-gap-seconds N] [--scan-timeout-seconds N]", err))
 	}
@@ -105,9 +104,9 @@ func (d Deps) cmdIdentify(ctx context.Context, args []string, streams cli.IO) er
 
 func (d Deps) cmdFinalize(ctx context.Context, args []string, streams cli.IO) error {
 	var dryRun bool
-	fs := newFlagSet("finalize")
+	fs := cli.NewFlagSet("finalize")
 	fs.BoolVar(&dryRun, "dry-run", false, "")
-	ids, err := parseFlags(fs, args)
+	ids, err := cli.ParseFlags(fs, args)
 	if err != nil || len(ids) != 1 {
 		return cli.Usage(errors.New("usage: mkv-rip finalize RUN_ID [--dry-run]"))
 	}
@@ -264,27 +263,4 @@ func (d Deps) loadRun(id string) (*runstore.State, error) {
 		return nil, cli.Usage(err)
 	}
 	return st, err
-}
-
-func newFlagSet(name string) *flag.FlagSet {
-	fs := flag.NewFlagSet(name, flag.ContinueOnError)
-	fs.SetOutput(io.Discard)
-	return fs
-}
-
-// parseFlags parses args with flags allowed among the positional arguments, as
-// `finalize RUN_ID --dry-run` and `identify SERIAL --spinup-gap-seconds 0` are
-// written, and returns the positional ones.
-func parseFlags(fs *flag.FlagSet, args []string) ([]string, error) {
-	var positional []string
-	for {
-		if err := fs.Parse(args); err != nil {
-			return nil, err
-		}
-		args = fs.Args()
-		if len(args) == 0 {
-			return positional, nil
-		}
-		positional, args = append(positional, args[0]), args[1:]
-	}
 }

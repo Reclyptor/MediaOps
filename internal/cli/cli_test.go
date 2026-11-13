@@ -61,3 +61,19 @@ func TestPrintJSON(t *testing.T) {
 		t.Fatalf("got %q", buf.String())
 	}
 }
+
+func TestParseFlagsAmongPositionals(t *testing.T) {
+	var run, dry bool
+	fs := NewFlagSet("t")
+	fs.BoolVar(&run, "go", false, "")
+	fs.BoolVar(&dry, "dry-run", false, "")
+
+	got, err := ParseFlags(fs, []string{"a.json", "--go", "b.json", "--dry-run"})
+	if err != nil || !run || !dry || strings.Join(got, ",") != "a.json,b.json" {
+		t.Fatalf("got %v, go=%v dry=%v, err=%v", got, run, dry, err)
+	}
+
+	if _, err := ParseFlags(NewFlagSet("t"), []string{"--nope"}); err == nil {
+		t.Fatal("an unknown flag was accepted")
+	}
+}
