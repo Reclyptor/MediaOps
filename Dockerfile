@@ -1,6 +1,9 @@
 # The mkv-* tools written in Go: static binaries, so the final stage needs no Go.
 FROM golang:1.27.3-alpine3.24 AS gobuild
 WORKDIR /src
+# Keep the module cache in its own directory so it holds exactly this module's
+# dependencies; the final stage ships it so ad-hoc Go programs build offline.
+ENV GOMODCACHE=/gomod
 COPY go.mod go.sum ./
 RUN go mod download
 COPY cmd/ cmd/
@@ -147,6 +150,35 @@ COPY --from=makemkv /opt/makemkv /opt/makemkv
 # instead of in front of a disc. The MSG line is MakeMKV's own banner.
 RUN /opt/makemkv/bin/makemkvcon -r info disc:9999 | tee /dev/stderr | grep -q '^MSG:1005,'
 
+# The Go toolchain is the pod's ad-hoc runtime: one-off analysis programs are
+# written, run and thrown away in the pod, and they import kit (the same code the
+# mkv-* tools use) rather than reimplementing it. GOROOT is its own layer, ahead
+# of everything that changes per build, so it is pulled again only on a Go bump.
+# The tests, docs and testdata are dead weight for `go run`.
+COPY --from=gobuild /usr/local/go /usr/local/go
+RUN rm -rf /usr/local/go/test /usr/local/go/api /usr/local/go/doc /usr/local/go/misc \
+ && find /usr/local/go/src -type d -name testdata -prune -exec rm -rf {} +
+
+# The module cache and the source are root-owned, so read-only to the media user:
+# a job cannot rewrite kit or its dependencies, and with the proxy off it can only
+# import what is already here (stdlib, kit, golang.org/x/sys). GOFLAGS=-mod=mod
+# lets `go mod tidy` fill in a job's go.sum from that cache; GOCACHE is the one
+# writable spot, on the pod's /work volume.
+COPY --from=gobuild /gomod /opt/mediaops/gomod
+COPY go.mod go.sum /opt/mediaops/src/
+COPY cmd/ /opt/mediaops/src/cmd/
+COPY kit/ /opt/mediaops/src/kit/
+COPY internal/ /opt/mediaops/src/internal/
+ENV GOTOOLCHAIN=local GOPROXY=off GOSUMDB=off GOFLAGS=-mod=mod CGO_ENABLED=0 \
+    GOMODCACHE=/opt/mediaops/gomod GOCACHE=/work/.cache/go-build \
+    PATH="/usr/local/go/bin:${PATH}"
+
+# Proves the offline path at build time: the template resolves kit and x/sys with
+# no network. Runs as root, so it gets a throwaway GOCACHE rather than /work.
+RUN cp -r /opt/mediaops/src/kit/template /tmp/job && cd /tmp/job \
+ && GOCACHE=/tmp/gocache go mod tidy && GOCACHE=/tmp/gocache go build -o /dev/null . \
+ && rm -rf /tmp/job /tmp/gocache
+
 # uid 3000 matches every file under /mnt/primary/videos (mode 770). Running as this
 # user is what makes a root-owned media file impossible rather than merely
 # discouraged. gid 100 is Alpine's existing `users` group; the NFS export squashes
@@ -157,7 +189,9 @@ COPY --chown=3000:100 scripts/ /opt/mediaops/bin/
 COPY --chown=3000:100 --from=gobuild /out/ /opt/mediaops/bin/
 RUN chmod 0755 /opt/mediaops/bin/* \
  && /opt/mediaops/bin/mkv-rip --version \
- && /opt/mediaops/bin/mkv-drives --version
+ && /opt/mediaops/bin/mkv-drives --version \
+ && /opt/mediaops/bin/mkv-archive --version \
+ && /opt/mediaops/bin/mkv-promote --version
 
 # The library convention is group-writable. The NFS export supplies the group by
 # squashing every client to 3000:3000, so files and directories carry gid 3000, not
