@@ -834,8 +834,10 @@ emptyDir). With `GOPROXY=off` anything outside the standard library, `kit` and
 `golang.org/x/sys` fails at compile time instead of fetching.
 
 ```bash
+# PLAN is the plan dir's pod path, set on the workstation; the double quotes expand it
+# before the command reaches the pod, which has no PLAN of its own.
 kubectl -n mediaops exec deploy/mediaops -- bash -c \
-  'cp -r /opt/mediaops/src/kit/template "$PLAN/src/seamcheck" && cd "$PLAN/src/seamcheck" && go mod tidy && go run . ARGS'
+  "cp -r /opt/mediaops/src/kit/template '$PLAN/src/seamcheck' && cd '$PLAN/src/seamcheck' && go mod tidy && go run . ARGS"
 ```
 
 The build proves this offline: a `RUN` copies the template, runs `go mod tidy` and
