@@ -38,7 +38,8 @@ name is dropped because a category lives on exactly one box. The working
 categories and the archive sit on different NAS permanently, so an archive move
 is normally a cross-filesystem copy rather than a rename.
 
-The pod runs as **uid 3000, gid 100**, matching every file already on the share.
+The pod runs as **uid 3000, gid 100**. The NAS export squashes every write to
+3000:3000, so files on the share are `media:3000` whatever group the process has.
 No process in it is ever root, so a root-owned media file is not merely avoided
 by convention — it is unrepresentable.
 
@@ -58,8 +59,8 @@ by convention — it is unrepresentable.
 | `mkv-dupcheck DIR TRACK` | is a track an alternate cut of another, or distinct content? |
 | `mkv-titlescan FILE OUT START END [STEP] [BAND]` | hunt for an episode title card |
 | `mkv-staticcheck FILE...` | is this a real extra, or a disc menu / logo card? |
-| `mkv-drives [--labels]` | one JSON line per optical drive: serial, USB port, link speed, tray/media |
-| `mkv-rip PLAN.json` / `status ID` / `wait ID` / `finalize ID` | staggered disc ripping into `_pending`, verified, with a manifest; `finalize` re-verifies failed discs |
+| `mkv-drives` | a JSON array of the optical drives: serial, USB port, link speed, tray/media |
+| `mkv-rip start\|identify\|status\|wait\|list\|finalize\|stop` | staggered disc ripping into `_pending`, verified, with a manifest; `identify` reads the discs' title tables; `finalize` re-verifies failed discs |
 
 Every mutating tool is **dry-run by default** and needs `--go` to act. The exception is
 `mkv-rip`, which only ever writes new `.partial` directories and refuses to touch an
@@ -132,12 +133,18 @@ before it spins up — the fix for that needs root on the node.
 
 ```bash
 mkv-drives                       # what is in the bays, and at what link speed
-mkv-rip plan.json                # prints a run id; the rip survives a dropped exec
-mkv-rip status <run-id>          # per-disc state and progress
+mkv-rip identify                 # read the title table of every loaded drive, one at a time
+mkv-rip start plan.json          # prints the run id; the rip survives a dropped exec ("-" reads stdin)
+mkv-rip status [run-id]          # per-disc state and progress; no id = the run holding the drives
 mkv-rip wait <run-id>            # blocks; exits 0 only if every disc is done
-mkv-rip list                     # every run; a new run is refused while one is running
-mkv-rip finalize <run-id>        # (refused while a run runs; a new run is refused while this runs) re-verify a finished run's failed discs still in their drives
+mkv-rip list                     # every run, newest first
+mkv-rip finalize <run-id>        # re-verify a finished run's failed discs still in their drives
+mkv-rip stop <run-id>            # stop the run holding the drives
 ```
+
+One controller at a time: whoever may spin a drive (a rip, a `finalize`, an `identify`)
+holds a lock in the pod, and a second one is refused with exit 3, naming the holder.
+Every command prints one JSON value; errors are one `mkv-rip: FATAL:` line.
 
 Rips land in `$MEDIA_ROOT/dxp6800/_pending/` as `<dest>.partial/` and are renamed into
 place only after the run passes: makemkvcon exit 0, no read errors, every file's
@@ -155,6 +162,24 @@ The licence key arrives as `$MAKEMKV_KEY` and is written to `$HOME/.MakeMKV/` on
 NAS at `_pending/.rips/<run-id>/` (state, plan, controller log, per-disc rip and info logs),
 so a pod roll cannot lose the record of what was ripped. `mkv-rip` refuses to run if the
 staging tree is not a real mount.
+
+## Development
+
+`mkv-drives` and `mkv-rip` are Go (`cmd/`, with shared code in `kit/` and `internal/`);
+the other tools are still under `scripts/` and move over a tool at a time, in the same
+commit that deletes the script. A tool exists in one language only: CI fails if a name
+is in both `scripts/` and `cmd/`.
+
+```bash
+go vet ./... && go test -race ./...        # no hardware, network or key needed
+CGO_ENABLED=0 go build -o /tmp/out ./cmd/...
+```
+
+The tests replay `makemkvcon` output recorded from real discs
+(`internal/makemkv/testdata/`) and re-execute the test binary as the fake `makemkvcon`.
+CI runs `gofmt`, `go vet`, a pinned `staticcheck` and the tests before it builds an image,
+and a failing test blocks the push. Any merge to `master` rolls the pod, which kills a
+running rip: land only when `mkv-rip list` shows nothing running.
 
 ## The one thing to remember
 

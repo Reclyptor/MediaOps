@@ -102,8 +102,11 @@ cannot be run as root by accident.
 
 ### Baked-in scripts → `/opt/mediaops/bin` (on `PATH`)
 
-Versioned in the image repo under `scripts/`. These were developed against the
-backlog and are the reason this is an image and not just a package list:
+Versioned in the image repo under `scripts/`, except `mkv-drives` and `mkv-rip`,
+which are Go programs under `cmd/` (shared code in `kit/` and `internal/`) built
+into the image by a `golang` stage; the rest follow the same way, a tool at a time.
+These were developed against the backlog and are the reason this is an image and
+not just a package list:
 
 | Script | Purpose |
 |---|---|
@@ -113,8 +116,8 @@ backlog and are the reason this is an image and not just a package list:
 | `mkv-split` | drive `mkvmerge --split`, then verify part count, per-part duration and total-bytes-vs-source |
 | `mkv-promote` | manifest-driven mover with full accounting (see §5) |
 | `mkv-archive` | archive-before-promote into `$ARCHIVE_ROOT/<path within its share>`, preserving the layout the file had |
-| `mkv-drives` | one JSON line per optical drive: serial, device nodes, USB port, link speed, tray/media state (§10) |
-| `mkv-rip` | staggered, health-gated disc ripping into `_pending` with verification and a manifest (§10) |
+| `mkv-drives` | Go. One JSON array of the optical drives: serial, device nodes, USB port, link speed, tray/media state (§10) |
+| `mkv-rip` | Go. Staggered, health-gated disc ripping into `_pending` with verification and a manifest; `identify`, `finalize`, `stop` (§10) |
 
 **Split of responsibility:** stable tooling is baked into the image; *working
 state* — the split manifest, the content-verified corrections, run logs — lives
@@ -128,10 +131,16 @@ copy and promoted into the image once settled.
 
 ### CI
 
-`.github/workflows/build.yml`, copied from `Lucebox-DFlash`: push to `master`
-touching `Dockerfile` or `scripts/**` → buildx → push to `ghcr.io` tagged
-`latest` and `<timestamp>-<shortsha>`. GHA cache. Same `docker/metadata-action`
-+ `docker/build-push-action@v6` versions as the existing repos.
+`.github/workflows/build.yml`, copied from `Lucebox-DFlash` and extended. A `test`
+job runs on every pull request and every push to `master` touching the image's
+inputs (`Dockerfile`, `scripts/**`, `go.mod`, `go.sum`, `cmd/**`, `kit/**`,
+`internal/**`): no tool may exist as both `scripts/<name>` and `cmd/<name>/`, then
+`gofmt`, `go vet`, a pinned `staticcheck` and `go test -race`. `build-and-push` needs
+`test`, so a failure blocks the image. On a pull request it builds without pushing;
+on `master` it pushes to `ghcr.io` tagged `latest` and `<timestamp>-<shortsha>`, and
+passes that tag to the Go build, where each tool records it as `tool_version`. GHA
+cache. Same `docker/metadata-action` + `docker/build-push-action@v6` versions as the
+existing repos.
 
 ---
 
@@ -272,18 +281,18 @@ removes directories the archive emptied, so it can never climb out of the share.
 
 ### 4.2.2 Ownership and mode
 
-`runAsGroup: 100` alone does not decide what lands on disk. Two separate things do:
+What lands on disk is decided by two separate things, not by the pod's own uid and gid:
 
-- **The group comes from the NFS export.** `/mnt/primary/videos` is exported
-  `all_squash,anonuid=3000,anongid=<gid>`, so every client writes as that identity
-  regardless of its own uid/gid. It was `anongid=3000` for a period, which put new
-  files in group `reclyptor` instead of `users` and made `chgrp` return EPERM even
-  to the owning uid — the server refuses a group the squashed identity is not in.
-  Corrected to `anongid=100`; a client-side fix was never possible.
+- **The group comes from the NFS export.** The dxp6800 export squashes every client
+  to `3000:3000`, so files and directories
+  land as `media:3000` whatever uid or gid the writing process has, and the process'
+  own group (`runAsGroup: 100`) never reaches disk. No code in the pod calls `chown`
+  or `chgrp`: the server decides the owner, and a client-side fix is not possible.
 - **The mode comes from the creating process' umask,** and `kubectl exec` runs its
   command directly — not through `CMD` or `ENTRYPOINT` — so the image cannot set it
-  centrally. It is set per caller: `os.umask(0o007)` in `mkvlib.py` (every python
-  `mkv-*` tool imports it), `umask 0007` in `mkv-frames` and `mkv-titlescan`, and
+  centrally. It is set per caller: the Go `mkv-*` tools set it at start (`internal/cli`),
+  `os.umask(0o007)` in `mkvlib.py` (every python `mkv-*` tool imports it), `umask 0007`
+  in `mkv-frames` and `mkv-titlescan`, and
   `BASH_ENV=/etc/mediaops-profile.sh` for `kubectl exec -- bash -c`.
   **Not covered:** `kubectl exec -- sh -c`, since busybox ash reads `$ENV` only when
   interactive. Ad-hoc `sh -c 'mkdir …'` still inherits 022.
@@ -511,150 +520,216 @@ Unprivileged, `mkv-drives` still resolves every serial and link speed from sysfs
 but reports `tray`/`media` as `null` with an `error`, and `mkv-rip` blocks every
 disc rather than guess.
 
-The key reaches `makemkvcon` as `$MAKEMKV_KEY` (a Secret). `mkv-rip` and
-`mkv-drives --labels` write `$HOME/.MakeMKV/settings.conf` from it with mode 600
-and `app_DataDir=/work/makemkv`. `HOME` is the `/work` emptyDir, so the key never
-touches the NAS and is never logged.
+The key reaches `makemkvcon` as `$MAKEMKV_KEY` (a Secret). `mkv-rip start`, `identify`
+and `finalize` write `$HOME/.MakeMKV/settings.conf` from it with mode 600 and
+`app_DataDir=$HOME/makemkv`. `HOME` is the `/work` emptyDir, so the key never touches
+the NAS and is never logged; a key holding `"`, `\` or a newline is refused.
 
 ### `mkv-drives`
 
-Prints one JSON object per drive. It reads `/sys` and asks each drive for its tray
-state with `CDROM_DRIVE_STATUS` on a non-blocking fd, which does not spin a disc up
-and is safe at any time. `sg_turs` on the sg node is the fallback when the sr node
-is not visible. The USB device behind a drive is the nearest ancestor of
-`/sys/class/block/srN/device` holding both `serial` and `speed`; its basename is
-`usb_port` and its `speed` is `link_mbps`. `status` carries the raw state, because
-`not_ready` (a drive still becoming ready after a disc goes in) is not `no_disc`.
-`--labels` adds `label` from makemkvcon's drive list, which touches every drive
-holding media, so it is opt-in.
+Prints one JSON array of the optical drives, in sr order:
+
+```json
+[{"serial": "BP52E25512093803", "dev": "/dev/sr0", "sg": "/dev/sg0", "usb_port": "5-1.2.4",
+  "link_mbps": 480, "status": "tray_open", "tray": "open", "media": false, "error": null}]
+```
+
+It reads `/sys` and asks each drive for its tray state with `CDROM_DRIVE_STATUS` on a
+non-blocking fd, which does not spin a disc up and is safe at any time. `sg_turs` on the
+sg node is the fallback when the sr node is not visible; if neither answers, `status` is
+`unknown`, `tray` and `media` are `null` and `error` says why, rather than a guess. The USB
+device behind a drive is the nearest ancestor of `/sys/class/block/srN/device` holding
+both `serial` and `speed`; its basename is `usb_port` and its `speed` is `link_mbps`.
+`status` carries the raw state, because `not_ready` (a drive still becoming ready after
+a disc goes in) is not `no_disc`. With no drives it prints `[]`, a note on stderr, and
+exits 0. There is no `label`: reading a disc's name touches the disc, so `mkv-rip
+identify` does it, under the drive lease.
 
 ### `mkv-rip`
 
-`mkv-rip plan.json` refuses to start while another run is `running` (it names that run),
-then validates the plan, writes the key settings, and starts a
-controller detached in its own session (`setsid(2)`), so a dropped `kubectl exec`
-does not kill a rip. State lives on the NAS in `$MEDIA_ROOT/dxp6800/_pending/.rips/<run-id>/` (override:
-`$MKV_RIP_STATE`, for the selftest): `state.json`, `plan.json`, `controller.log`, a raw
-`disc-NN.log` of makemkvcon output per disc and its `disc-NN.info.log`. It is not on the
-`/work` emptyDir because a pod roll (any image push) would discard the only record of
-which discs were ripped and how they failed. Every command applies the same
-overlay guard as staging and refuses to run when the tree is not a mount; files are
-written group-writable (umask 0007, state at 0660). The MakeMKV settings and data dir
-stay under `$HOME` (`/work`): a licence and a cache, not run state. Disc-identification
-scratch (what the makemkv skill writes while working out which disc is in which bay)
-belongs in `_pending/.rips/discinfo/`, for the same reason. `status` prints the state; `wait` blocks until the run is `complete` or
-`incomplete` and exits 0 only for `complete`. If the controller dies without a
-verdict (pod restart), `status` reports the run `incomplete` rather than `running`
-forever.
+```
+mkv-rip start PLAN.json|-        validate, detach a controller, print {"run_id": ...}
+mkv-rip identify [SERIAL...]     detach a staggered `info` scan of loaded drives
+mkv-rip status [RUN_ID]          a run's state (default: the run holding the drives, else the newest)
+mkv-rip wait RUN_ID              block until the run is terminal; print its final state
+mkv-rip list                     every run, newest first
+mkv-rip finalize RUN_ID [--dry-run]   re-verify a run's failed discs
+mkv-rip stop RUN_ID              SIGTERM the controller holding the drives for that run
+```
 
-`status` and `wait` print `{run_id, state, started_at, finished_at, discs: [{serial,
-dest, state, reason, progress: {phase, current, total}, titles_done, titles_total,
-errors}], health: {dmesg_available, paused, pause_reason}}`, where `reason` is a
-sentence for every blocked, failed and suspect disc. `mkv-rip list` prints every run
-as `{run_id, state, started_at}`. The validated plan is copied to
-`<run-id>/plan.json` in that directory, so the caller's path stops mattering. A planned
-serial missing from sysfs is `blocked` with a reason saying the drive has fallen off
-the bus and needs the hub reset.
+Every command prints exactly one JSON value on stdout and errors as one line,
+`mkv-rip: FATAL: <sentence>`, on stderr. Exit codes: 0 success (for `wait`, the run ended
+`complete`); 1 the run ended `incomplete`, or `finalize` has nothing to do; 2 usage error,
+invalid input or unknown run id; 3 refused by a guard (the drives are leased, and the
+message names the holder; staging is not the NAS; `MAKEMKV_KEY` is missing); 4 internal
+error. `--selftest` is gone: the tests are `go test`.
 
-**Pre-flight** blocks a disc, with a reason, if its serial is unknown, it has no
-media, its link is not 480 Mbit/s, or its destination (or a `.partial` of it)
-already exists. It is checked when the run starts and again just before each disc
-spins up. Nothing is ever overwritten.
+**One controller at a time.** Whoever may spin a drive (a rip, a `finalize`, an
+`identify`) holds an exclusive `flock` on `/tmp/mkv-rip.lease` for its whole life and
+writes `{kind, run_id, pid, started_at}` into it, so a refusal can name it. Liveness is
+the held lock, never a pid: the kernel releases the lock the instant its holder dies,
+and a pod roll leaves an empty `/tmp`. A `running` or `finalizing` run whose lease is not
+held and naming it is dead: it is reported `incomplete` / "controller died", its
+unfinished discs `failed`, and that verdict is written to `state.json`.
+
+**Detaching.** `start`, `identify` and `finalize` validate in the foreground, then
+re-execute themselves as a controller in its own session (`setsid(2)`), with stdio on
+`/dev/null`, so a dropped `kubectl exec` does not kill it. The controller acquires the
+lease itself, creates the run directory, and reports back over a pipe: the foreground
+prints the run id, or the refusal and its exit code. A refused start leaves nothing
+behind. `makemkvcon` children carry `Pdeathsig: SIGKILL`, so a killed controller does
+not leave a process reading a drive.
+
+**State.** `$MEDIA_ROOT/dxp6800/_pending/.rips/<run-id>/` on the NAS holds `plan.json`
+(the validated request, immutable), `state.json` (schema 2, the only mutable file),
+`controller.log`, and `disc-NN/` with `info.log`, `rip.log` and one
+`finalize-N.info.log` per finalize attempt; nothing is overwritten. It is not on the
+`/work` emptyDir because a pod roll would discard the only record of which discs were
+ripped. Every command refuses when the staging tree is missing, is not writable or
+shares a device with `/`, and the tree is never created. State files are 0660. Only
+directories whose `state.json` says `"schema": 2` are runs; everything else under
+`.rips/` is left alone, and the Python-era runs are not read.
+
+`status` prints `state.json` as stored, with `controller.alive` filled in:
+
+```json
+{"schema": 2, "run_id": "...", "kind": "rip", "state": "running", "reason": null,
+ "started_at": "...", "finished_at": null, "tool_version": "...",
+ "controller": {"pid": 412, "alive": true},
+ "health": {"dmesg": {"available": false, "detail": "..."}, "paused_until": null,
+            "pause_reason": null, "events": []},
+ "discs": [{"index": 0, "serial": "...", "label": "...", "dest": "...", "state": "ripping",
+            "reason": null, "drive": {"dev", "sg", "usb_port", "link_mbps"},
+            "progress": {"phase", "current", "total"}, "titles": {"done": 3, "total": 8},
+            "makemkv_exit": null, "errors": [], "suspect_events": [], "eject": null,
+            "identified": null, "started_at": "...", "copy_started_at": "...",
+            "finished_at": null}],
+ "problems": []}
+```
+
+`run.state` is `running`, `finalizing`, `complete` or `incomplete`; `reason` is set for
+`incomplete`. A disc `reason` is a sentence for every blocked, failed and suspect disc.
+`eject` is `null` or `{ok, detail}`; `identified` is filled only by `identify`: `{name,
+volume_label, type, titles: [{id, duration, duration_seconds, chapters, source_playlist,
+size_bytes}]}`. `list` prints `[{run_id, kind, state, started_at, finished_at}]`.
+
+**Plan.** Unchanged: `{"discs": [...], "min_title_seconds": 60, "max_concurrent": 3,
+"spinup_gap_seconds": 30, "health_pause_seconds": 120, "scan_timeout_seconds": 900}`, the
+last five optional. A series disc is `{serial, category: anime|tv|hentai, series, season,
+disc}` and a movie `{serial, category: "movies", title}`; `season: null` is allowed only
+for hentai or a disc carrying `container_title`. Unknown keys, duplicate serials and
+duplicate destinations are rejected, and the message names the entry. Destinations, under
+`$MEDIA_ROOT/dxp6800/_pending/`: `<category>/<Series>/Season XX/Disc XX/` (hentai with a
+null season drops `Season XX`), `movies/<Title (Year)>/`. Only `/` is sanitised in
+directory names, to ` - `.
+
+**Pre-flight** blocks a disc, with a reason, if its serial is unknown, its drive state
+cannot be read, it has no media, its link is not 480 Mbit/s, or its destination (or a
+`.partial` of it) already exists. It is checked when the run starts and again just before
+each disc spins up. A drive still `not_ready` (as it is for a few seconds after a disc
+goes in) is re-checked on later ticks for up to 20 s, without pausing the controller's
+health polling, before the disc is blocked. Nothing is ever overwritten.
 
 **Title info pre-pass.** `makemkvcon ... mkv` prints no `TINFO` lines at all: it
 announces only `MSG:3307 "File 00009.mpls was added as title #0"`, plus progress. A
-parser fed only that run has no title table, so there are no lengths or output names to
-verify files against (every rip once failed as "not a title makemkvcon reported", good
-or not). So, while the disc holds the scanning slot, each disc is first read with
-`makemkvcon -r --noscan --minlength=<s> info dev:/dev/srN`, logged to `disc-NN.info.log`,
-and that table (`TINFO` 9 length, 16 source playlist, 27 output name; `CINFO` label) is
-what the rip is checked against. The slot and `scan_timeout_seconds` cover both
-commands. If the info pass exits non-zero, reports a fatal message or read errors, or
-lists no titles, the disc fails without being ripped (hours of copying that cannot be
-verified are not worth starting). After the rip, every title id it announced via
-`MSG:3307` must name the same source playlist in the table; title ids are positions in
-a list each invocation builds on its own, so a disagreement (a different disc, a
-changed playlist set) would verify files against the wrong lengths, and fails the disc
-with a sentence naming the title and both playlists.
+parser fed only that run has no title table, so there would be no lengths or output
+names to verify files against. So, while the disc holds the scanning slot, each disc is
+first read with `makemkvcon -r --noscan --minlength=<s> info dev:/dev/srN`, and that
+table (`TINFO` 9 length, 16 source playlist, 27 output name; `CINFO` label) is what the
+rip is checked against. The slot and `scan_timeout_seconds` cover both commands. If the
+info pass exits non-zero, reports a fatal message or read errors, or lists no titles, the
+disc fails without being ripped (hours of copying that cannot be verified are not worth
+starting). After the rip, every title id it announced via `MSG:3307` must name the same
+source playlist in the table; title ids are positions in a list each invocation builds on
+its own, so a disagreement (a different disc, a changed playlist set) would verify files
+against the wrong lengths, and fails the disc with a sentence naming the title and both
+playlists.
 
-**Rips** run `makemkvcon -r --noscan --progress=-same --minlength=<s> mkv
-dev:/dev/srN all <dest>.partial`. `--noscan` stops makemkvcon from touching every
-other drive during its startup drive scan, which would defeat the stagger. The
-command's exit status is stored on the disc record as `makemkv_rc`, so a later
-re-verification has it.
+**Rips** run `makemkvcon -r --noscan --progress=-same --minlength=<s> mkv dev:/dev/srN
+all <dest>.partial`. `--noscan` stops makemkvcon from touching every other drive during
+its startup drive scan, which would defeat the stagger. The command's exit status is
+stored on the disc as `makemkv_exit`, so a later re-verification has it.
 
-**Staggering.** A start needs all of: fewer than `max_concurrent` rips running;
-no drive in `scanning`; `spinup_gap_seconds` since the previous drive left
-`scanning`; and no health pause. `scanning` becomes `ripping` on the progress
-text, not the numeric codes: a `PRGC` named `Saving to MKV file` under a `PRGT`
-beginning `Saving`. The `Opening ... disc` PRGCs (`Scanning contents`, `Processing
-AV clips`, `Processing BD+ code`, `Loading playlists`) and `Analyzing seamless
-segments` are all still analysis — the drive is not yet streaming — so they keep
-the slot held. A disc stuck scanning past `scan_timeout_seconds` (900) is killed
-so it cannot starve the run.
+**Staggering.** A start needs all of: fewer than `max_concurrent` rips running; no drive
+in `scanning`; `spinup_gap_seconds` since the previous drive left `scanning`; and no
+health pause. `scanning` becomes `ripping` on the progress text, not the numeric codes: a
+`PRGC` named `Saving to MKV file` under a `PRGT` beginning `Saving`. The `Opening ...
+disc` PRGCs (`Scanning contents`, `Processing AV clips`, `Processing BD+ code`, `Loading
+playlists`) and `Analyzing seamless segments` are all still analysis — the drive is not
+yet streaming — so they keep the slot held. A disc stuck scanning past
+`scan_timeout_seconds` (900) is killed so it cannot starve the run.
 
-**Health watch.** Primarily sysfs, because `dmesg` is normally unreadable for uid
-3000 (`dmesg_restrict`): a drive's link speed dropping, its USB device
-disappearing, or its sr node disappearing is an event. New kernel lines naming a
-port on the same USB bus (`error -71`, `USB disconnect`, `reset ...-speed USB
-device`, `device descriptor read`, `new full-speed`, `over-current`) are events
-too, when `dmesg` is readable; `status` says `health.dmesg: unavailable: ...`
-when it is not. Any event pauses new starts for `health_pause_seconds` (120). An
-event on a port that is, or is an ancestor of, a running drive's port marks that
-disc `suspect`.
+**Health watch.** Primarily sysfs, because `dmesg` is normally unreadable for uid 3000
+(`dmesg_restrict`): a drive's link speed dropping, its USB device disappearing, or its
+sr node disappearing is an event. New kernel lines naming a port on the same USB bus
+(`error -71`, `USB disconnect`, `reset ...-speed USB device`, `device descriptor read`,
+`new full-speed`, `over-current`) are events too, when `dmesg` is readable; `status` says
+`health.dmesg.available: false` with the error text when it is not. Any event pauses new
+starts for `health_pause_seconds` (120). An event on a port that is, or is an ancestor
+of, a running drive's port marks that disc `suspect`.
 
 **Success** needs all of: makemkvcon exits 0 and the title info pass agrees with it
-(above); no read/write-error MSG lines (those
-whose format is `Error '%1' occurred while ...`, a SCSI error, `Failed to save
-title`, or corrupt-source and hash-check messages); no failed titles in
-makemkvcon's own tally; at least one `.mkv`; every file mapped to a reported title
-with an ffprobe duration within 2% of that title's reported length (floor of 2 s,
-since reported lengths are whole seconds); and every reported title of at least
-`min_title_seconds` present as a file. Then segment titles are set with
-`mkvpropedit`, `manifest.json` is written, `.partial` is renamed into place, and
-the tray is ejected (`CDROMEJECT`; `sg_start --eject` as the fallback). An eject
-failure is recorded on the disc but does not fail a verified rip.
+(above); no read/write-error MSG lines (those whose format is `Error '%1' occurred while
+...`, a SCSI error, `Failed to save title`, or corrupt-source and hash-check messages);
+makemkvcon's own copy tally (`"%1 titles saved"`, plus `"%2 failed"` when present, read by
+format string) present, with no failed titles and a saved count equal to the number of
+`.mkv` files, so a rip that exits 0 without a tally fails; every file mapped to a
+reported title with an ffprobe duration within 2% of that title's reported length (floor
+of 2 s, since reported lengths are whole seconds); and every reported title of at least
+`min_title_seconds` present as a file. Anything that cannot be read counts as a failure.
+Then segment titles are set with `mkvpropedit` and read back, `manifest.json` is written,
+the folder and files get modes 0770 and 0660 (makemkvcon creates files 0666 whatever the
+umask), `.partial` is renamed into place, and the tray is ejected: `sg_prevent --allow`,
+`CDROMEJECT`, then the tray state is read back, with `sg_start --eject` as the fallback.
+An eject failure is recorded on the disc but does not fail a verified rip.
 
-**Failure** leaves the `.partial` folder for inspection and reports why. A
-`suspect` disc whose rip otherwise verifies is also left as `.partial`, with its
-manifest, for a human to judge — a USB reset mid-rip is not something to promote
-automatically.
+**Failure** leaves the `.partial` folder for inspection and reports why. A `suspect` disc
+whose rip otherwise verifies is also left as `.partial`, with its manifest, for a human to
+judge — a USB reset mid-rip is not something to promote automatically.
 
-**`mkv-rip finalize <run-id> [--dry-run]`** re-verifies a finished run's `failed`
-discs, for a run that failed verification wrongly (as the pre-pass bug did) or whose
-rip is good but was never promoted. It refuses while any run is `running`, naming it.
-It holds `.rips/finalize.lock` (containing the run id) for its whole life, and
-`mkv-rip PLAN.json` refuses to start while that lock is held, naming the run being
-finalized; a second `finalize` is refused the same way. A crash releases the lock. A disc
-qualifies when its `.partial` and `disc-NN.log` still exist, its drive (matched by
-serial) holds media and links at 480 Mbit/s, and its rip finished cleanly. One disc at
-a time, with `spinup_gap_seconds` between drives, it runs the info pass, rebuilds the
-parser from the saved `disc-NN.log` plus the new info log, and runs the same
-verification as a normal finish with the stored `makemkv_rc`. A passing disc then takes
-exactly the normal tail: segment titles, manifest, rename out of `.partial`, eject,
-`done`; both paths call one function (`finish_disc`). Suspect discs stay `suspect`, and
-a destination collision still fails. Runs from before the pre-pass stored no
-`makemkv_rc`: it is taken as 0 only when the log's last `MSG:5005` copy-complete line
-reports no failed titles and no fatal message appears, else the disc is skipped as still
-failed. The run state is recomputed at the end; `--dry-run` prints which discs would be
-processed and why the rest are skipped, touching nothing.
+**`mkv-rip finalize <run-id> [--dry-run]`** re-verifies a finished run's `failed` discs,
+for a run that failed verification wrongly or whose rip is good but was never promoted.
+It takes the drive lease like any other controller, so it is refused while anything else
+holds the drives, and a run or an `identify` is refused while it works; both refusals name
+the holder. It detaches and prints the run id; `wait` follows it. A disc qualifies when its
+`makemkv_exit` is recorded and 0, its `.partial` and `disc-NN/rip.log` still exist, and its
+drive (matched by serial) holds media and links at 480 Mbit/s. One disc at a time, with
+`spinup_gap_seconds` between drives, it runs a fresh info pass into its own
+`finalize-N.info.log`, re-parses the saved `rip.log`, and runs the same verification and
+the same tail (titles, manifest, modes, rename, eject) as a normal finish, through one
+function. Suspect discs stay `suspect`, and a destination collision still fails. The run
+state is recomputed at the end. `--dry-run` prints `{"would_finalize": [...], "skipped":
+[{index, serial, reason}]}`, touching nothing, and exits 1 when nothing qualifies.
 
-**Titles.** Segment titles follow anime-normalize, so a ripped disc needs no
-retitling there: every title on a series disc (episodes and extras) gets the
-canonical series name, and a movie gets `<Title (Year)>`. This is the container
-title field of the MakeMKV GUI. Episode names stay with anime-normalize, which
-puts them in filenames once the order is verified by dialogue.
-A film that ships in a series box set is planned with the series, `season: null`
-and its own `container_title` (`Series: Film (Year)`), which lands it at
-`<category>/<Series>/Disc XX/` titled as a movie. Only `/` is sanitised in
-directory names, to ` - `; segment titles are never altered.
+**`mkv-rip identify [SERIAL...]`** reads each loaded drive's title table without ripping:
+with no serials, every drive holding media at 480 Mbit/s, one at a time with
+`--spinup-gap-seconds` between them, the others recorded as `blocked`. Each disc ends
+`done` with `identified` filled in; it never ejects and writes nothing to the library.
+Flags: `--min-title-seconds 60`, `--spinup-gap-seconds 30`, `--scan-timeout-seconds 900`.
 
-The run is `complete` only when every disc is `done`; otherwise `incomplete`, with
-a `problems` list of the discs that are not.
+**`mkv-rip stop <run-id>`** sends SIGTERM to the controller holding the drives for that
+run. No disc starts afterwards, `makemkvcon` is terminated, `pending` discs become
+`failed` ("run was stopped before this disc started"), active discs `failed` ("run was
+stopped mid-rip (kept at ...partial)"), and the run is `incomplete` with reason `stopped`.
 
-`mkv-rip --selftest` runs fixtures for the robot parser, the destination and title
-formats, the verifier, the health attribution and the start gate, with no hardware. The
-title-info fixtures are trimmed from a real disc: an `mkv` log and an `info` log with a
-matching and a mismatched playlist, the legacy exit-status inference, `finalize`
-refusing while a run runs, its plan, and an end-to-end `finalize` against a fake
-`makemkvcon`.
+**Titles.** Segment titles follow anime-normalize, so a ripped disc needs no retitling
+there: every title on a series disc (episodes and extras) gets the canonical series name,
+and a movie gets `<Title (Year)>`. This is the container title field of the MakeMKV GUI.
+Episode names stay with anime-normalize, which puts them in filenames once the order is
+verified by dialogue. A film that ships in a series box set is planned with the series,
+`season: null` and its own `container_title` (`Series: Film (Year)`), which lands it at
+`<category>/<Series>/Disc XX/` titled as a movie. Segment titles are never altered.
+
+The run is `complete` only when every disc is `done`; otherwise `incomplete`, with a
+`problems` list of the discs that are not.
+
+**Tests.** `go test -race ./...` needs no hardware, network, root or key. The recorded
+`makemkvcon` output of the 2026-11-09 run (four real discs, `PRGV` lines thinned) is
+`internal/makemkv/testdata/`; a handful of hand-written lines stand in for failures no
+real disc has produced yet. End-to-end tests re-execute the test binary as a fake
+`makemkvcon`, `ffprobe` or `mkvpropedit`. CI runs them before any image is pushed.
+
+**`manifest.json`** in each ripped folder: `{schema, run_id, disc_index, plan, drive,
+makemkv: {version, exit, titles_saved}, disc: {name, volume_label, type}, titles: [{id,
+name, file, chapters, duration_seconds, duration, size_bytes, source_playlist, file_bytes,
+file_seconds, segment_title}], errors, suspect_events, started, copy_started, finished}`.
