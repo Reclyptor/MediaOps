@@ -31,6 +31,9 @@ func realSyncDir(dir string) error {
 	return d.Close()
 }
 
+// SyncDir flushes dir, so a name created or renamed in it survives a crash.
+func SyncDir(dir string) error { return syncDir(dir) }
+
 // WriteFile replaces path with data in one step. The temp file is chmodded
 // explicitly because creating it gives 0600 and the umask would otherwise
 // decide the rest; the directory is synced after the rename so the new name
