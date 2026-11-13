@@ -85,7 +85,7 @@ is a stream-copy/probe utility with no heavy runtime.
 | `mkvtoolnix` | `mkvmerge` (chapter splitting — keyframe-exact, stream copy), `mkvpropedit` (container titles), `mkvinfo`, `mkvextract` |
 | `ffmpeg` | `ffprobe` for duration/stream/chapter probing; `ffmpeg` for frame extraction |
 | `imagemagick` + `font-dejavu` | `montage` for timestamped contact sheets. The font is not optional — `-annotate` silently produces unlabelled tiles without it, and an unlabelled contact sheet cannot be used to verify a cut point |
-| `python3`, `ca-certificates` | the detection/promotion scripts; AniList GraphQL over TLS (stdlib `urllib` is sufficient — no `requests`) |
+| `python3`, `ca-certificates` | the remaining Python tools (detection, frame evidence); AniList GraphQL over TLS (stdlib `urllib` is sufficient — no `requests`) |
 | `bash`, `coreutils`, `findutils`, `grep`, `sed`, `gawk`, `jq` | Alpine's busybox applets differ enough from GNU to break scripts subtly |
 | `rsync` | verified copies; `--remove-source-files` only ever under M3 |
 | `mediainfo` | second opinion on container metadata when `ffprobe` is ambiguous |
@@ -102,8 +102,8 @@ cannot be run as root by accident.
 
 ### Baked-in scripts → `/opt/mediaops/bin` (on `PATH`)
 
-Versioned in the image repo under `scripts/`, except `mkv-drives` and `mkv-rip`,
-which are Go programs under `cmd/` (shared code in `kit/` and `internal/`) built
+Versioned in the image repo under `scripts/`, except `mkv-drives`, `mkv-rip`,
+`mkv-archive` and `mkv-promote`, which are Go programs under `cmd/` (shared code in `kit/` and `internal/`) built
 into the image by a `golang` stage; the rest follow the same way, a tool at a time.
 These were developed against the backlog and are the reason this is an image and
 not just a package list:
@@ -114,8 +114,8 @@ not just a package list:
 | `mkv-bounds` | episode-boundary detection over a Play-All's chapter list; emits the `mkvmerge --split chapters:N,M` argument |
 | `mkv-frames` | render N timestamped frames from a file, tiled into one contact sheet |
 | `mkv-split` | drive `mkvmerge --split`, then verify part count, per-part duration and total-bytes-vs-source |
-| `mkv-promote` | manifest-driven mover with full accounting (see §5) |
-| `mkv-archive` | archive-before-promote into `$ARCHIVE_ROOT/<path within its share>`, preserving the layout the file had |
+| `mkv-promote` | Go. Manifest-driven mover with full accounting (§5, §11) |
+| `mkv-archive` | Go. Archive-before-promote into `$ARCHIVE_ROOT/<path within its share>`, preserving the layout the file had (§11) |
 | `mkv-drives` | Go. One JSON array of the optical drives: serial, device nodes, USB port, link speed, tray/media state (§10) |
 | `mkv-rip` | Go. Staggered, health-gated disc ripping into `_pending` with verification and a manifest; `identify`, `finalize`, `stop` (§10) |
 
@@ -213,7 +213,7 @@ the whole bug in one number.
 ### 4.2.1 The archive is one tree, on the box that is not being worked
 
 The archive used to live on the same share as the file, resolved from the file
-itself by `mkvlib.share_root()`. That made every archive move a rename, but it
+itself by a mount-point lookup. That made every archive move a rename, but it
 also scattered the archive across every NAS and let the working box fill up with
 material that is, by definition, never read again. It is now a single tree,
 configured by **`ARCHIVE_ROOT`**.
@@ -225,8 +225,8 @@ exceptional one** — which is exactly what the previous design refused to do.
 
 `ARCHIVE_ROOT` has **no default**, unlike `MEDIA_ROOT`. The risk is asymmetric: a
 wrong `MEDIA_ROOT` finds nothing and fails loudly, while a wrong `ARCHIVE_ROOT`
-accepts real data onto the overlay and reports success. `mkvlib.archive_root()`
-refuses to proceed unless the variable is set, the directory already exists, its
+accepts real data onto the overlay and reports success. `paths.Config.ArchiveRoot`
+(`kit/paths`) refuses to proceed unless the variable is set, the directory already exists, its
 `st_dev` differs from `/`, and it is writable. It never creates the root — a
 `mkdir` would itself succeed on the overlay and look exactly like the correct
 outcome.
@@ -274,7 +274,7 @@ Three consequences:
    copy can fill the destination halfway through. `mkv-archive` sums the bytes
    that will actually be copied and refuses the batch if they do not fit.
 
-`share_root()` survives for one job: bounding the upward `rmdir` sweep that
+The mount-point lookup (`paths.Config.ShareRoot`) survives for one job: bounding the upward `rmdir` sweep that
 removes directories the archive emptied, so it can never climb out of the share.
 
 `securityContext: runAsUser 3000, runAsGroup 100, fsGroup 100` (M5).
@@ -355,16 +355,20 @@ Every move is checked before anything is written, then verified after:
    > files, and there are `.vob` and `.m4v` holdings besides.
 3. no destination path already occupied (M4)
 4. batch touch-validation of every destination directory before the first move
-5. `shutil.move`, then byte-size equality source↔destination
-6. `ffprobe` decode check on every moved file
-7. cleanup of source directories only once empty
+5. the move (a rename, or the safe copy of §11 when it crosses a filesystem),
+   then byte-size equality source↔destination
+6. `ffprobe` decode check on every moved `.mkv`
+7. cleanup of source directories only once empty, and never beyond the share
+   (§11)
+
+Container titles are set between 6 and 7, on the files that passed 6.
 
 > Step 6 exists because it once silently did nothing: it was written with
 > `ffprobe -f null -`, but `-f null` is an **ffmpeg** flag. `ffprobe` exited
 > with "Unknown input format: null" on all 44 files, which read like 44
 > warnings and actually meant the check never ran. **A checker that fails open
 > is worse than no checker** — so `mkv-promote` treats a non-zero probe exit as
-> fatal, and asserts a non-empty duration rather than merely a clean exit.
+> a failure, and asserts a positive duration rather than merely a clean exit.
 
 ---
 
@@ -733,3 +737,107 @@ real disc has produced yet. End-to-end tests re-execute the test binary as a fak
 makemkv: {version, exit, titles_saved}, disc: {name, volume_label, type}, titles: [{id,
 name, file, chapters, duration_seconds, duration, size_bytes, source_playlist, file_bytes,
 file_seconds, segment_title}], errors, suspect_events, started, copy_started, finished}`.
+
+## 11. Library moves: `mkv-archive` and `mkv-promote`
+
+Go since the second step of the rewrite. Same manifests, same names, same dry-run by
+default and `--go` to act; what changed is that each prints one JSON report, refuses
+more, and moves files without ever having fewer than one whole copy.
+
+```
+mkv-archive MANIFEST.json [--go]    manifest: [{"path": "<MEDIA_ROOT-relative>"}, ...]
+mkv-promote MANIFEST.json [--go]    manifest: [{"src", "dst", "title"?}, {"keep": ...}, ...]
+```
+
+Paths are relative to `MEDIA_ROOT`. An absolute path, or one that leaves `MEDIA_ROOT`, is
+refused (the Python joined whatever it was given, so an absolute path silently replaced
+the root). An unknown key in an entry is an error naming the entry, not a silently
+ignored typo. A `keep` cannot be combined with `src`, `dst` or `title`, and a path that
+is both promoted and kept is refused.
+
+**Exit codes** are the shared set: 0 done (or a clean dry run); 1 the moves happened but
+the decode check failed; 2 a bad manifest, a missing source, a double mapping, an
+unaccounted video; 3 a refusal (`ARCHIVE_ROOT` unusable, a destination occupied, a
+destination that cannot be created, the copies not fitting); 4 an I/O failure.
+
+**Output** is one JSON report: `dry_run`, `files`, `bytes`, `copied_bytes` (what a
+cross-filesystem move would copy), every move with its `bytes` and whether it was
+`moved`, and the directories swept. A refusal before anything moved prints only the
+`FATAL` line. A failure after the first move prints the report with `error` set and the
+moves already made marked, because those files are in the library and the operator needs
+to know which.
+
+### The move
+
+`internal/library` moves a file by renaming it. Across filesystems, which is the normal
+case for the archive, it copies to `<dst>.partial`, fsyncs, gives the copy the source's
+mode and times, and checks that it is as long as the source and that the source did not
+change while it was read. It then renames the copy into place, syncs the directory, and
+only then unlinks the source, and the unlink itself re-checks that the destination is a
+regular file of the expected size. At every instant at least one whole copy exists. A
+failure before the rename leaves the source untouched and removes the `.partial`; a
+failure after it keeps both files and says so. A destination that exists is never
+overwritten. A symlink is never moved as if it were the file it points at.
+
+### The archive
+
+`$ARCHIVE_ROOT/<path within its share>`, the share being `MEDIA_ROOT`'s immediate child
+(§4.2.1). `ARCHIVE_ROOT` is checked by `kit/paths` before anything is read or written:
+set, existing, on a different device from `/`, and writable. Free space is checked up
+front, against only the bytes that cross a filesystem, per destination filesystem; a
+batch that does not fit is refused before the first file moves, and a batch of renames
+needs no space.
+
+### The promotion, step by step
+
+The seven steps of §5 are all kept, in order, and a dry run performs steps 1 to 3
+(refusing exactly what the real run would) and writes nothing. Step 4 is the only
+one that touches the library before the moves: it creates the destination directories and
+proves each file name creatable with an empty file, which it removes again.
+
+- **Step 2** walks every source directory with `filepath.WalkDir`; a directory that cannot
+  be read fails the check rather than being skipped. `VIDEO_EXT` is `videoExts` in
+  `internal/library/video.go`, a test pins it to the list in `probe-tracks.sh`, and
+  extensions match in any case.
+- **Step 5** also checks each file's size against the one recorded before the move,
+  and that the source is gone.
+- **Step 6** uses `ffprobe -of json` and the same positive-duration rule as
+  before, with up to 12 probes at once, and lists every failure in manifest order. Container titles
+  are then set with `mkvpropedit` and read back with `mkvmerge -J`, so a title that did not
+  land is an error. Both programs go through `kit/proc`.
+- **Step 7** removes only empty directories, using `rmdir`, which cannot remove a file.
+  Its bound is the share the directory lives on, found as the nearest mount point; it never
+  removes the share, anything above it, or the staging tree (which the rip tools require
+  to exist and will not create).
+
+**Nothing deletes media.** The only calls that remove anything are in
+`internal/library/remove.go`: the source after a verified copy, a `.partial` the move
+itself made, an empty probe file from step 4, and `rmdir` of an empty directory. A test
+parses the package and its two commands and fails on any other call that can remove or
+truncate a file or rename over one.
+
+## 12. The Go toolchain as the ad-hoc runtime
+
+The image carries the Go toolchain so one-off programs run in the pod, where every media
+write has to happen, the way a throwaway `.py` script did. `GOROOT` is `/usr/local/go`,
+copied from the build stage so the compiler that runs one-offs is the one that built the
+tools, and trimmed of `test/`, `api/`, `doc/`, `misc/` and `src/**/testdata`. It is its own
+layer, ahead of everything that changes per build.
+
+The module's source is at `/opt/mediaops/src` (root-owned, read-only to `media`), and a job
+template at `kit/template` carries a `go.mod` with a `replace` onto that path. Dependencies
+come from a read-only module cache at `/opt/mediaops/gomod`, filled by `go mod download` in
+the build stage, so it holds exactly the module's dependencies. The environment is
+`GOTOOLCHAIN=local GOPROXY=off GOSUMDB=off GOFLAGS=-mod=mod CGO_ENABLED=0`,
+`GOMODCACHE=/opt/mediaops/gomod` and `GOCACHE=/work/.cache/go-build` (the `/work`
+emptyDir). With `GOPROXY=off` anything outside the standard library, `kit` and
+`golang.org/x/sys` fails at compile time instead of fetching.
+
+```bash
+kubectl -n mediaops exec deploy/mediaops -- bash -c \
+  'cp -r /opt/mediaops/src/kit/template "$PLAN/src/seamcheck" && cd "$PLAN/src/seamcheck" && go mod tidy && go run . ARGS'
+```
+
+The build proves this offline: a `RUN` copies the template, runs `go mod tidy` and
+`go build` with no network, and fails the image if the template does not resolve `kit` and
+`x/sys`.

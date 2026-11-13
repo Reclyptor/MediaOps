@@ -23,11 +23,11 @@ kubectl -n mediaops exec -it deploy/mediaops -- bash
 Manifest paths stay `MEDIA_ROOT`-relative (`dxp6800/anime/…`), but `/mnt/media`
 is a plain directory with one mount per NAS beneath it — **not** a share. Never
 synthesize a sibling path from `MEDIA_ROOT`: it lands on the pod's overlay and is
-destroyed by the next redeploy. Scratch space resolves the share from the file
-with `mkvlib.share_root()`; the archive is a configured tree, not a sibling.
+destroyed by the next redeploy. Anything that has to know the share resolves it from the file
+(`paths.Config.ShareRoot`); the archive is a configured tree, not a sibling.
 
 The archive is **one tree, on the box that is not being worked**, set by
-`ARCHIVE_ROOT`. It has no default — `mkvlib.archive_root()` refuses to run unless
+`ARCHIVE_ROOT`. It has no default — `paths.Config.ArchiveRoot` refuses to run unless
 it is set, exists, sits on a different device than `/`, and is writable. The value
 comes from a sops-encrypted Secret, not from the deployment manifest: that repo is
 public, and dataset names are not published there.
@@ -51,8 +51,8 @@ by convention — it is unrepresentable.
 | `mkv-bounds FILE EP_MINUTES` | find episode boundaries in a Play-All track |
 | `mkv-frames FILE OUT.png T...` | timestamped frames tiled into one contact sheet |
 | `mkv-split FILE PREFIX CH,CH` | split on chapter numbers, then verify the result |
-| `mkv-archive MANIFEST.json` | move superseded library files into `$ARCHIVE_ROOT/`, layout preserved |
-| `mkv-promote MANIFEST.json` | move verified files into the library, with accounting |
+| `mkv-archive MANIFEST.json [--go]` | move superseded library files into `$ARCHIVE_ROOT/`, layout preserved |
+| `mkv-promote MANIFEST.json [--go]` | move verified files into the library, with accounting |
 | `mkv-order INVENTORY.jsonl SERIES` | prove a disc's track order IS episode order, from its Play-All |
 | `mkv-anilist "<search>"` | episode counts and titles from AniList |
 | `mkv-fingerprint batch\|match` | prove episode adjacency from next-episode previews |
@@ -62,12 +62,13 @@ by convention — it is unrepresentable.
 | `mkv-drives` | a JSON array of the optical drives: serial, USB port, link speed, tray/media |
 | `mkv-rip start\|identify\|status\|wait\|list\|finalize\|stop` | staggered disc ripping into `_pending`, verified, with a manifest; `identify` reads the discs' title tables; `finalize` re-verifies failed discs |
 
-Every mutating tool is **dry-run by default** and needs `--go` to act. The exception is
+Every mutating tool is **dry-run by default** and needs `--go` to act; `mkv-archive` and
+`mkv-promote` print one JSON report either way ([`SPEC.md` §11](SPEC.md#11-library-moves-mkv-archive-and-mkv-promote)). The exception is
 `mkv-rip`, which only ever writes new `.partial` directories and refuses to touch an
 existing destination.
 
 Also on `PATH`: `mkvmerge`, `mkvpropedit`, `mkvinfo`, `mkvextract`, `ffmpeg`,
-`ffprobe`, `mediainfo`, `montage`, `python3`, `jq`, `rsync`.
+`ffprobe`, `mediainfo`, `montage`, `python3`, `go`, `jq`, `rsync`.
 
 `mkv-order` is the cheapest verification here and worth reaching for first: lay a
 disc's episode files end to end and check whether their chapter marks reproduce the
@@ -165,7 +166,7 @@ staging tree is not a real mount.
 
 ## Development
 
-`mkv-drives` and `mkv-rip` are Go (`cmd/`, with shared code in `kit/` and `internal/`);
+`mkv-drives`, `mkv-rip`, `mkv-archive` and `mkv-promote` are Go (`cmd/`, with shared code in `kit/` and `internal/`);
 the other tools are still under `scripts/` and move over a tool at a time, in the same
 commit that deletes the script. A tool exists in one language only: CI fails if a name
 is in both `scripts/` and `cmd/`.
@@ -180,6 +181,23 @@ The tests replay `makemkvcon` output recorded from real discs
 CI runs `gofmt`, `go vet`, a pinned `staticcheck` and the tests before it builds an image,
 and a failing test blocks the push. Any merge to `master` rolls the pod, which kills a
 running rip: land only when `mkv-rip list` shows nothing running.
+
+## One-off programs
+
+The image carries the Go toolchain for the throwaway analysis an agent used to write in
+Python. Copy the job template next to the evidence it will produce and run it; nothing is
+fetched, so it works with the network off:
+
+```bash
+cp -r /opt/mediaops/src/kit/template "$PLAN/src/seamcheck" && cd "$PLAN/src/seamcheck"
+go mod tidy && go run . ARGS
+```
+
+The template imports `kit/`, the packages the tools are built from (`proc`, `ffprobe`,
+`mkvtool`, `fsutil`, `paths`). Anything outside the standard library, `kit` and
+`golang.org/x/sys` fails to compile rather than download. The compile cache is on `/work`,
+so the first run after a pod roll pays a few seconds and later ones are sub-second. See
+[`SPEC.md` §12](SPEC.md#12-the-go-toolchain-as-the-ad-hoc-runtime).
 
 ## The one thing to remember
 
