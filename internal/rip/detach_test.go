@@ -176,6 +176,10 @@ func TestChildDiesWithController(t *testing.T) {
 		t.Fatal(err)
 	}
 	p.until("makemkvcon to die with its controller", func() bool { return gone(child) })
+	// The child's death signal fires when the controller's thread exits, which can
+	// come before the kernel closes the controller's files and so its lease. The
+	// run reads as alive until the lease is released.
+	p.until("the controller's lease to be released", func() bool { return !p.state(id).Controller.Alive })
 
 	st := p.state(id)
 	if st.State != runstore.RunIncomplete || deref(st.Reason) != "controller died" || st.Controller.Alive {
