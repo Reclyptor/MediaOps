@@ -1,0 +1,3 @@
+MSG:1005,0,1,"MakeMKV v2.0.0 linux(x64-release) started","%1 started","MakeMKV v2.0.0 linux(x64-release)"
+PRGT:3404,0,"Opening Blu-ray disc"
+MSG:5010,0,1,"Failed to open disc","Failed to open disc"

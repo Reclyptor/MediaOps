@@ -1,0 +1,24 @@
+Recorded makemkvcon robot-mode logs for the parser and verifier tests.
+
+Source: /mnt/media/dxp6800/_pending/.rips/20261109-215032-4e78/
+Captured: 2026-11-13, read-only.
+
+  pwp-d1/          disc-00  Parallel World Pharmacy D1 (11 titles, a 3:09:36 Play-All, two .m2ts titles)
+  pwp-d2/          disc-01  Parallel World Pharmacy D2 (8 titles)
+  revue-d3/        disc-04  Revue Starlight BD-3 (a film filed with its series, 3 titles)
+  penguindrum-d2/  disc-06  PENGUINDRUM - Disc 2 (2 titles, a 3 h Play-All)
+
+Each directory holds info.log (the `info` pass) and rip.log (the `mkv` pass).
+
+The only transformation: PRGV lines are thinned to the first 50, the last 50 and
+every 500th. Nothing else was edited.
+
+synthetic/ is hand-written, not recorded. No real failing disc has been logged yet,
+so these use real MSG syntax around framing copied from pwp-d2/rip.log:
+
+  scsi-read-error.log   a SCSI read error (MSG 2003) mid-copy, followed by a clean tally
+  fatal-5021.log        a rip that dies on fatal MSG 5021
+  failed-tally-5004.log a rip ending in the MSG 5004 "%1 titles saved, %2 failed" form
+  info-fatal-5010.log   an info pass that dies on fatal MSG 5010
+
+No file here may contain the MakeMKV key; a test enforces it.
