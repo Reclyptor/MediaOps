@@ -1,3 +1,16 @@
+# The mkv-* tools written in Go: static binaries, so the final stage needs no Go.
+FROM golang:1.27.3-alpine3.24 AS gobuild
+WORKDIR /src
+COPY go.mod go.sum ./
+RUN go mod download
+COPY cmd/ cmd/
+COPY kit/ kit/
+COPY internal/ internal/
+ARG VERSION=dev
+RUN CGO_ENABLED=0 go build -trimpath \
+      -ldflags "-s -w -X github.com/reclyptor/mediaops/internal/cli.Version=${VERSION}" \
+      -o /out/ ./cmd/...
+
 # MakeMKV is closed-source and glibc-only; this image is musl. The bridge is the
 # one jlesage/docker-makemkv uses: build and unpack on Debian, bundle the glibc
 # runtime beside the binaries, and repoint each ELF's interpreter and rpath at the
@@ -134,23 +147,29 @@ COPY --from=makemkv /opt/makemkv /opt/makemkv
 # instead of in front of a disc. The MSG line is MakeMKV's own banner.
 RUN /opt/makemkv/bin/makemkvcon -r info disc:9999 | tee /dev/stderr | grep -q '^MSG:1005,'
 
-# uid 3000 / gid 100 matches every file under /mnt/primary/videos (mode 770, group
-# `users`). Running as this user is what makes a root-owned media file impossible
-# rather than merely discouraged. gid 100 is Alpine's existing `users` group.
+# uid 3000 matches every file under /mnt/primary/videos (mode 770). Running as this
+# user is what makes a root-owned media file impossible rather than merely
+# discouraged. gid 100 is Alpine's existing `users` group; the NFS export squashes
+# every write to 3000:3000 whatever group the process runs as.
 RUN adduser -u 3000 -G users -D -H -s /bin/bash media
 
 COPY --chown=3000:100 scripts/ /opt/mediaops/bin/
-RUN chmod 0755 /opt/mediaops/bin/*
+COPY --chown=3000:100 --from=gobuild /out/ /opt/mediaops/bin/
+RUN chmod 0755 /opt/mediaops/bin/* \
+ && /opt/mediaops/bin/mkv-rip --version \
+ && /opt/mediaops/bin/mkv-drives --version
 
-# The library convention is group-writable by `users`. The NFS export supplies the
-# GROUP (anongid=100); the MODE comes from the creating process, and the container
-# default umask of 022 yields 644 files and 755 dirs -- no group write, wrong every
-# time. umask 0007 gives 660 files and 770 dirs; it cannot give 770 files, because
-# umask only clears bits and never adds the execute bit.
+# The library convention is group-writable. The NFS export supplies the group by
+# squashing every client to 3000:3000, so files and directories carry gid 3000, not
+# `users`; the MODE comes from the creating process, and the container default
+# umask of 022 yields 644 files and 755 dirs -- no group write, wrong every time.
+# umask 0007 gives 660 files and 770 dirs; it cannot give 770 files, because umask
+# only clears bits and never adds the execute bit.
 #
 # `kubectl exec` runs its command DIRECTLY: it does not go through CMD or
 # ENTRYPOINT, so neither can set a umask for exec'd work. Coverage is therefore
-# per-caller, in three places:
+# per-caller:
+#   - the Go mkv-* tools      -> they set it at start (internal/cli)
 #   - the python mkv-* tools  -> os.umask(0o007) in mkvlib.py, which they all import
 #   - mkv-frames, mkv-titlescan -> `umask 0007` in the script
 #   - `kubectl exec -- bash -c` -> BASH_ENV below, which bash sources even

@@ -7,14 +7,71 @@ on:
     paths:
       - Dockerfile
       - scripts/**
+      - go.mod
+      - go.sum
+      - cmd/**
+      - kit/**
+      - internal/**
+      - .github/workflows/build.yml
+  pull_request:
+    paths:
+      - Dockerfile
+      - scripts/**
+      - go.mod
+      - go.sum
+      - cmd/**
+      - kit/**
+      - internal/**
       - .github/workflows/build.yml
   workflow_dispatch:
 
 env:
   REGISTRY: ghcr.io
+  STATICCHECK_VERSION: 2026.2.2
 
 jobs:
+  test:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      # A tool changes language in exactly one commit: the one that adds
+      # cmd/<name> deletes scripts/<name>.
+      - name: Check Tools Exist Once
+        run: |
+          status=0
+          for dir in cmd/*/; do
+            name=$(basename "$dir")
+            if [ -e "scripts/$name" ]; then
+              echo "::error::$name exists as both scripts/$name and cmd/$name/"
+              status=1
+            fi
+          done
+          exit "$status"
+
+      - name: Check Formatting
+        run: test -z "$(gofmt -l .)"
+
+      - name: Vet
+        run: go vet ./...
+
+      - name: Staticcheck
+        run: go run honnef.co/go/tools/cmd/staticcheck@${{ env.STATICCHECK_VERSION }} ./...
+
+      - name: Test
+        run: go test -race -count=1 ./...
+
   build-and-push:
+    needs: test
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -31,6 +88,7 @@ jobs:
 
       # Flux's ImagePolicy sorts numerically on this timestamp, so the tag must be
       # sortable and unique per build; the short SHA rides along for traceability.
+      # The tools record it as tool_version.
       - name: Compute Version Tag
         id: version
         run: |
@@ -40,6 +98,7 @@ jobs:
         uses: docker/setup-buildx-action@v3
 
       - name: Log In to GitHub Container Registry
+        if: github.event_name != 'pull_request'
         uses: docker/login-action@v3
         with:
           registry: ${{ env.REGISTRY }}
@@ -59,7 +118,9 @@ jobs:
         uses: docker/build-push-action@v6
         with:
           context: .
-          push: true
+          push: ${{ github.event_name != 'pull_request' }}
+          build-args: |
+            VERSION=${{ steps.version.outputs.tag }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
