@@ -34,6 +34,24 @@ func TestMain(m *testing.M) {
 		fmt.Println(sig)
 	case "sleep":
 		time.Sleep(time.Minute)
+	case "megabytes":
+		chunk := make([]byte, 1<<20)
+		for i := 0; i < 64; i++ {
+			os.Stdout.Write(chunk)
+		}
+	case "noisy":
+		line := strings.Repeat("x", 99) + "\n"
+		for i := 0; i < 30000; i++ {
+			fmt.Fprint(os.Stderr, line)
+		}
+		fmt.Fprint(os.Stderr, "THE END\n")
+	case "endless":
+		chunk := make([]byte, 1<<16)
+		for {
+			if _, err := os.Stdout.Write(chunk); err != nil {
+				os.Exit(9)
+			}
+		}
 	case "ignoreterm":
 		signal.Ignore(syscall.SIGTERM)
 		fmt.Println("ready")

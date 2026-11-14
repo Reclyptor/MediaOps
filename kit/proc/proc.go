@@ -71,8 +71,20 @@ func (e *Exec) Stream(ctx context.Context, argv []string, onLine func(string)) (
 }
 
 func (e *Exec) run(ctx context.Context, argv []string, stdout, stderr io.Writer) (int, error) {
-	if err := Check(argv); err != nil {
+	cmd, err := e.command(ctx, argv)
+	if err != nil {
 		return -1, err
+	}
+	cmd.Stdout, cmd.Stderr = stdout, stderr
+	return wait(ctx, cmd, argv[0])
+}
+
+// command checks argv and builds the child with the environment, Pdeathsig and
+// cancellation every child gets. Run, Stream and Pipe all start from it, so
+// none can skip the guard.
+func (e *Exec) command(ctx context.Context, argv []string) (*exec.Cmd, error) {
+	if err := Check(argv); err != nil {
+		return nil, err
 	}
 	resolve := e.Resolve
 	if resolve == nil {
@@ -80,11 +92,10 @@ func (e *Exec) run(ctx context.Context, argv []string, stdout, stderr io.Writer)
 	}
 	path, err := resolve(argv[0])
 	if err != nil {
-		return -1, fmt.Errorf("proc: locating %s: %w", argv[0], err)
+		return nil, fmt.Errorf("proc: locating %s: %w", argv[0], err)
 	}
 
 	cmd := exec.CommandContext(ctx, path, argv[1:]...)
-	cmd.Stdout, cmd.Stderr = stdout, stderr
 	cmd.Env = append(os.Environ(), e.Env...)
 	cmd.SysProcAttr = &syscall.SysProcAttr{Pdeathsig: syscall.SIGKILL}
 	cmd.Cancel = func() error { return cmd.Process.Signal(syscall.SIGTERM) }
@@ -92,7 +103,12 @@ func (e *Exec) run(ctx context.Context, argv []string, stdout, stderr io.Writer)
 	if cmd.WaitDelay == 0 {
 		cmd.WaitDelay = DefaultGrace
 	}
+	return cmd, nil
+}
 
+// wait starts cmd and blocks until it is reaped. ctx is only consulted for its
+// error: the command's own context may be a derived one.
+func wait(ctx context.Context, cmd *exec.Cmd, name string) (int, error) {
 	// Pdeathsig fires when the OS thread that forked the child exits, not when
 	// the process does (golang/go#27505), so that thread stays pinned until the
 	// child is reaped.
@@ -105,7 +121,7 @@ func (e *Exec) run(ctx context.Context, argv []string, stdout, stderr io.Writer)
 		runtime.LockOSThread()
 		defer runtime.UnlockOSThread()
 		if err := cmd.Start(); err != nil {
-			done <- outcome{-1, fmt.Errorf("proc: starting %s: %w", argv[0], err)}
+			done <- outcome{-1, fmt.Errorf("proc: starting %s: %w", name, err)}
 			return
 		}
 		waitErr := cmd.Wait()
@@ -116,7 +132,7 @@ func (e *Exec) run(ctx context.Context, argv []string, stdout, stderr io.Writer)
 		case errors.As(waitErr, &exitErr):
 			done <- outcome{exitErr.ExitCode(), nil}
 		default:
-			done <- outcome{cmd.ProcessState.ExitCode(), fmt.Errorf("proc: waiting for %s: %w", argv[0], waitErr)}
+			done <- outcome{cmd.ProcessState.ExitCode(), fmt.Errorf("proc: waiting for %s: %w", name, waitErr)}
 		}
 	}()
 
