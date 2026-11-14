@@ -62,13 +62,20 @@ jobs:
         run: test -z "$(gofmt -l .)"
 
       - name: Vet
-        run: go vet ./...
+        run: go vet -tags integration ./...
 
       - name: Staticcheck
-        run: go run honnef.co/go/tools/cmd/staticcheck@${{ env.STATICCHECK_VERSION }} ./...
+        run: go run honnef.co/go/tools/cmd/staticcheck@${{ env.STATICCHECK_VERSION }} -tags integration ./...
+
+      # The split, frame and remux tests run the real mkvtoolnix and ffmpeg on
+      # synthetic files, and fail rather than skip when either is missing.
+      - name: Install mkvtoolnix and ffmpeg
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends mkvtoolnix ffmpeg
 
       - name: Test
-        run: go test -race -count=1 ./...
+        run: go test -race -count=1 -tags integration ./...
 
   build-and-push:
     needs: test
