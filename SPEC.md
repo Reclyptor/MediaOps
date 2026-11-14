@@ -103,7 +103,7 @@ cannot be run as root by accident.
 ### Baked-in scripts → `/opt/mediaops/bin` (on `PATH`)
 
 Versioned in the image repo under `scripts/`, except `mkv-drives`, `mkv-rip`,
-`mkv-archive` and `mkv-promote`, which are Go programs under `cmd/` (shared code in `kit/` and `internal/`) built
+`mkv-archive`, `mkv-promote` and `mkv-manifest`, which are Go programs under `cmd/` (shared code in `kit/` and `internal/`) built
 into the image by a `golang` stage; the rest follow the same way, a tool at a time.
 These were developed against the backlog and are the reason this is an image and
 not just a package list:
@@ -116,6 +116,7 @@ not just a package list:
 | `mkv-split` | drive `mkvmerge --split`, then verify part count, per-part duration and total-bytes-vs-source |
 | `mkv-promote` | Go. Manifest-driven mover with full accounting (§5, §11) |
 | `mkv-archive` | Go. Archive-before-promote into `$ARCHIVE_ROOT/<path within its share>`, preserving the layout the file had (§11) |
+| `mkv-manifest` | Go. `check`, `exec` and `gen` for op manifests: an overlay-replay gate that every `exec` runs first, a journaled, resumable executor, dry run by default (§12) |
 | `mkv-drives` | Go. One JSON array of the optical drives: serial, device nodes, USB port, link speed, tray/media state (§10) |
 | `mkv-rip` | Go. Staggered, health-gated disc ripping into `_pending` with verification and a manifest; `identify`, `finalize`, `stop` (§10) |
 
@@ -829,7 +830,221 @@ itself made, an empty probe file from step 4, and `rmdir` of an empty directory.
 parses the package and its two commands and fails on any other call that can remove or
 truncate a file or rename over one.
 
-## 12. The Go toolchain as the ad-hoc runtime
+## 12. Manifest runs: `mkv-manifest`
+
+`manifest-exec.py` was the most-copied script on the NAS: about thirty copies, one per
+plan dir, each drifting from the others. Its gate, `manifest-precheck.py`, was a separate
+program that a rushed run could skip, and the executor acted the moment it was started.
+`mkv-manifest` replaces both with one tool whose executor cannot run without the gate: every
+`exec`, dry or not, runs `check` first, and a single finding refuses the run before any op
+is touched.
+
+```
+mkv-manifest check MANIFEST [--films]        replay every pending op on an overlay; report every finding
+mkv-manifest exec MANIFEST [--go] [--films]  check, then (only with --go) perform the pending ops in order
+mkv-manifest gen rename-series DIR NAME [--only N,N…] [--strip-date]   print a manifest
+mkv-manifest gen archive-tree SRC DST        print a manifest
+mkv-manifest --version
+```
+
+Flags may sit before or after the positionals. `check` and `exec` print their report on
+stdout for exits 0 and 1 and only the `FATAL` line for 2 to 4, as the movers do.
+
+| Exit | `check` | `exec` | `gen` |
+|---|---|---|---|
+| 0 | no findings | a dry run with no findings, or every pending op applied | manifest printed |
+| 1 | findings | findings (nothing touched); or an op failed or the run was stopped, and a rerun resumes | n/a |
+| 2 | usage; the manifest is unreadable, is not a regular file (a symlink to one is followed), is not JSON, not an object, or `ops` is missing or not an array | same | usage; DIR or SRC missing or not a directory; nothing to do |
+| 3 | `ARCHIVE_ROOT` unusable while the manifest has archive ops; the journal belongs to another version of the manifest, is damaged, is a Python-era `<stem>.journal`, or is not a regular file | same, plus another `exec --go` holds this manifest, or the journal or lock file cannot be created or is not a regular file | n/a |
+| 4 | internal | internal, or a journal write failure | internal |
+
+### The manifest
+
+```json
+{"name": "penguindrum", "note": "…", "generated": {…}, "ops": [ {"kind": "rename", …}, … ]}
+```
+
+`ops` is required; `name`, `note` and `generated` (written by `gen`, never read) are
+optional, and any other top-level key is a finding. Every path is **absolute and clean**.
+This is deliberately unlike the movers' `MEDIA_ROOT`-relative paths: the real manifests and
+the skill text have always written absolute ones, and about ninety-five of them exist.
+Sources, ordinary destinations and mkvpropedit targets must lie strictly within
+`MEDIA_ROOT`; archive destinations (`archive_file.dst`, `archive_dir.dst`,
+`remux.archive_dst`) strictly within `ARCHIVE_ROOT`, which `kit/paths` checks as the movers
+do, so a manifest with archive ops refuses with exit 3 when that guard fails. The Python
+accepted any destination, the overlay included.
+
+Every op may carry `why` and `note`, which are ignored. Any other unknown key is a finding:
+the Python silently ignored `audio_nondefault`, `extra` and `after_dir_rename`, and a typo
+like `audio_defualt` simply did nothing.
+
+| `kind` | Required | Optional | Notes |
+|---|---|---|---|
+| `rename` | `src`, `dst` | `title`, `size` | file move (a rename, else the library's safe copy); `title` is set and read back after |
+| `rename_dir`, `move_dir` | `src`, `dst` | none | directory move; the two are synonyms kept for the existing manifests |
+| `archive_file` | `src`, `dst` | `size` | `dst` under `ARCHIVE_ROOT` |
+| `archive_dir` | `src`, `dst` | none | `dst` under `ARCHIVE_ROOT` |
+| `remux` | `src`, `dst`, `archive_dst`, `title` | `size` | mkvmerge stream copy to `dst` (which must end `.mkv`), the original archived to `archive_dst` |
+| `title` | `path`, `title` | none | segment title |
+| `flags` | `path`, `audio_default`, `sub_default` | none | absolute ffprobe stream indexes; `sub_default` must be present and may be `null`, meaning no default subtitle. `names` is refused: track names are never changed |
+| `audio_lang` | `path`, `langs` | none | `{"<abs index>": "<ISO 639-2, three lowercase letters>"}`, non-empty; `names` is refused |
+| `rmdir_if_empty` | `path` | none | never `MEDIA_ROOT`, a share (`MEDIA_ROOT/<x>`) or the staging tree |
+
+`title` values are non-empty. `size` is a non-negative byte count that `check` compares
+with the source as it will be at that point in the run; the generators write it. Targets of
+`title`, `flags`, `audio_lang`, `rename` with a `title`, and `remux.dst` must end in
+`.mkv`, `.mka` or `.mks`.
+
+### `check`
+
+Replays the pending ops, those not `done` in the journal, in order against an in-memory
+overlay of the real tree and collects every problem rather than stopping at the first:
+schema errors; a `src` that is not a regular file (a symlink is not one) or not a directory at that point in the run; a directory move whose source holds a symlink or special file (the library's tree scan refuses it too, naming it); a
+`size` mismatch; an existing `dst`; two ops claiming one `dst`; a `dst` inside its own
+`src`; a destination whose nearest existing ancestor is not a writable directory; an
+mkvpropedit target that is not a file at that point; and a destination name that is over
+255 bytes, not valid UTF-8, holds a control character, or ends in `.partial`, which is
+reserved for copies in flight. The Python proved a name creatable by touching a file in the
+library. That is replaced by these static name rules, so `check` writes nothing at all.
+`rmdir_if_empty` on a missing or non-empty directory is a note, not a finding, because the
+executor skips it.
+
+`--films` adds the post-state audit from `manifest-simulate.py`, for series directories
+(`MEDIA_ROOT/<share>/<category>/<series>`) whose `Movies/` any op touches, read through the
+overlay so `_pending` sources work. In `Movies/` there is no subdirectory and no non-video
+file; each video is named `<Series> - S99EXX - <Title (YYYY)>[ - partN].ext` with `<Series>`
+equal to the directory name or, for a non-series directory (every video outside `Extras/`
+sits under `Movies/`), `<Title (YYYY)> - S99EXX[ - partN].ext`; the title holds a `(YYYY)` year; the numbers run from 1 with no
+gap, and one repeats only when every file holding it is a `partN`. The simulator's
+hard-coded series list and its job-specific inventory report are not ported.
+
+The report is one JSON object: `manifest`, `sha256`, `ops`, `kinds`, `done`, `pending`,
+`in_doubt`, `sources` (per directory file counts), `bytes`, `notes`, `findings`, `films` and
+`clean`. A finding or note carries the 1-based `op`, or `null` for whole-manifest and
+`--films` findings, with its `kind`, `path` and `problem` or `note`.
+
+### `exec`
+
+`exec` parses the manifest, takes the per-manifest lock when `--go` is given, reads the
+journal, and runs `check` with the journal in view. Any finding prints the report with the
+check embedded, touches nothing and exits 1. Without `--go` it then prints the plan with
+every pending op marked `pending` and exits 0; a dry run creates no journal, no lock file
+and no directory. With `--go` it appends a `start` record and, for each pending op, asks the
+tree again what `check` asked (a source that is a regular file of the recorded `size`, an
+absent destination), then `begin`, the work, a read-back, `done`. The first failure appends
+`failed` and stops with exit 1; no later op runs. `finish` is written when the run ends
+after the last pending op and when it is stopped between ops.
+`cli.Main` turns SIGINT and SIGTERM into a cancelled context. A cancel between ops ends the run
+with exit 1, `error` "stopped before op N: …" and a `finish` record. A cancel during an op
+cuts a copy or child short and fails that op: it is journaled `failed`, stays in doubt, and
+a rerun assesses it.
+
+Every move goes through `internal/library`, children go through `kit/proc`, and nothing in
+`internal/manifest` removes or renames anything; a structural test asserts it, as the
+library's does.
+
+| `kind` | Performs | Read-back |
+|---|---|---|
+| `rename` | creates the destination directory, `Mover.Move`, then `SetTitle` when `title` is set | dst is a regular file of the same size, src is gone; the title via `mkvmerge -J` |
+| `rename_dir`, `move_dir`, `archive_dir` | creates the parent, `Mover.MoveTree`: a rename, or across devices file by file through the safe move and then `rmdir` of the emptied source directories; a source holding a symlink or special file is refused before anything moves | dst's tree (relative path to size, regular files) equals the source's, recorded in `begin`; src is gone |
+| `archive_file` | as `rename`, no title | as `rename` |
+| `remux` | discards a leftover `dst.partial`; `mkvmerge -q -o dst.partial src` (exit 0 or 1); verifies; sets the title on the partial; places it at `dst` with `library.PlacePartial` (a same-directory rename, never a copy, refusing an existing `dst`); moves `src` to `archive_dst`. A failure up to and including the placing discards the partial | decoded frame count equal and not zero (`ffprobe -count_frames -of json`, v:0; unreadable fails); durations within 0.1 s; playable stream signature (type, codec, channels, width, height) equal; ffmpeg null-decode error lines of `dst` no more than `src`'s; non-media source streams reported in `detail` |
+| `title` | `SetTitle` | `mkvmerge -J` |
+| `flags` | `SetDefaultFlags` | every audio and sub disposition as wanted, exactly one default audio, at most one default sub, every track name unchanged |
+| `audio_lang` | `SetAudioLanguages`, including the Matroska `LANGUAGE` tag rewrite the Python did, because Plex reads the tag over the Language element | every audio stream's language as wanted, titles and defaults unchanged; the rewritten tags as wanted |
+| `rmdir_if_empty` | `RemoveDirIfEmpty` | a missing or non-empty directory is `skipped` with a detail, not a failure |
+
+mkvpropedit addresses tracks as `track:aN` and `track:sN`. The absolute ffprobe index maps
+to N by order among tracks of that type, and the op refuses when ffprobe's and
+`mkvmerge -J`'s per-type counts differ rather than guess.
+
+The report adds `dry_run`, the embedded `check`, `ops`, `already_done`, `applied`, a
+`results` entry per pending op (`op`, `kind`, `target`, `status` of `done`, `settled`,
+`skipped`, `pending` or `failed`, `bytes`, `detail`), `bytes`, the `journal` path, `error`
+when the run stopped early and `failed_op` when an op itself failed.
+
+### Journal, lock and resume
+
+The journal is `<manifest dir>/<manifest name without .json>.journal.jsonl`, append-only,
+one JSON line per record, each fsynced: `start` (manifest SHA-256, op count, `at`, tool
+version, pid), `begin` (op, kind, `at`, the state settling needs: the source size or its
+tree), `done` (op, `at`, bytes, detail), `failed` (op, `at`, error) and `finish` (`at`, ops
+applied in the run). Because a manifest sits in its job's plan dir on the NAS, so does its
+journal, and a pod roll loses nothing.
+
+Every `start` must carry the current manifest's SHA-256. A manifest edited after ops were
+applied is exit 3 (the message counts every op journaled `done`), as is a Python-era
+`<stem>.journal` beside it: resuming that by index would redo ops. A line cut short by a
+crash is accepted only as the last line, or when a `repair` record follows it; any other
+unparseable line, an unknown event or an op outside the manifest is exit 3. A run that
+opens a journal whose last line was torn ends that line with a newline and appends
+`repair` (`at`, `torn_bytes`) before anything else, because nothing in a journal is ever
+truncated. The journal, like the lock file, must be a regular file; it is opened with
+`O_NOFOLLOW`, and one that is a symlink, FIFO, device or directory is exit 3.
+
+`exec --go` holds `flock(LOCK_EX|LOCK_NB)` on `/tmp/mkv-manifest-<first 16 hex of
+sha256(absolute manifest path)>.lock`, pod-local like the drive lease, so two execs of one
+manifest cannot interleave; the second gets exit 3. The lock is taken before the journal
+is read and `check` runs, and the lock file is never removed.
+
+On a rerun, ops with `done` are skipped. An op with `begin` and no `done` is in doubt and is
+assessed from the tree before anything runs. `check` does the same, so the gate and the
+executor see one picture:
+
+| `kind` | src gone, dst whole | src whole, dst absent | both present |
+|---|---|---|---|
+| file moves | `settled`, journaled `done`; a `title` is still applied | redone | conflict: a finding naming both paths, never resolved by deleting |
+| directory moves | `settled` when dst's tree equals the recorded one | redone | resumed: the remaining files move; a file present on both sides is a conflict |
+| `remux` | `settled` when `src` is gone and `dst` and `archive_dst` exist | redone, the partial discarded | `dst` and `src` present, `archive_dst` absent: re-verify, title, archive. Any other mix is a conflict |
+| `title`, `flags`, `audio_lang`, `rmdir_if_empty` | redone, being idempotent | redone | redone |
+
+### The generators
+
+Both print a manifest with `"generated": {"by": "mkv-manifest gen …", "args": […], "at": …}`
+and write nothing; review the output, then `exec` it.
+
+- `gen rename-series DIR NAME` turns each `Season N` directory (all, or `--only`) into
+  `rename` ops with a `size`, to `Season 0N/NAME - SxxExx<rest>` for every file that
+  matches the `rename-series.py` episode pattern; `--strip-date` drops a trailing
+  ` - [YYYY-MM-DD]`. When the folder is being padded, its other files move unchanged by
+  `rename`, its subdirectories by `move_dir`, and an `rmdir_if_empty` of the old folder
+  follows. Files left in an already-padded folder are listed in `generated.unmatched`. No
+  `Season` directory, or no episode at all, is exit 2.
+- `gen archive-tree SRC DST` writes one `archive_file` (with `size`) per regular file under
+  SRC to the same relative path under DST, then `rmdir_if_empty` for each directory of SRC,
+  deepest first and SRC last. DST may already exist, though not inside SRC, and only per-file
+  collisions are findings, as in `archive-tree.py`. A symlink or special file under SRC, or an empty SRC,
+  is exit 2.
+
+### What changed from the Python
+
+- Dry run is the default and `--go` acts. The Python acted at once.
+- `check` is part of every `exec`, so it cannot be skipped.
+- Unknown keys are findings; `names` on `flags` and `audio_lang` is refused.
+- Archive destinations must lie under `ARCHIVE_ROOT`.
+- Probes use `-of json`. The Python's `frames_and_packets` used `csv=p=0`, the exact
+  pattern the skill warns against.
+- Directory moves cross devices. `manifest-exec.py`'s `move_dir` could not, which is why
+  Outlanders' extras move was a hand-written `run.sh`.
+- `sub_default` is required but may be `null`, so "no default subtitle" is stated rather
+  than implied by an absent key.
+- `defer` is not ported; no real manifest uses it.
+- The touch test is replaced by the static name rules above.
+- Progress is journaled beside the manifest and resumable, where the Python kept a bare
+  index in `<stem>.journal`.
+
+### Tests
+
+`internal/manifest/testdata/` holds three manifests from real plan dirs, with their
+share names rewritten to neutral ones and a `README` recording every transformation:
+Penguindrum's `rename-manifest.json`, a coherent subset of `film-plan-v2.json` covering
+`remux` and the directory and archive ops, and Outlanders, whose hand-run script is
+translated into ops. Tests build each fixture's tree in a temp dir and run `check` and
+`exec --go` against it with a fake `proc.Runner` that keeps each file's metadata in the
+file's own bytes, so moves carry it. A test tagged `integration` runs `remux`, `title`,
+`flags` and `audio_lang` against real mkvtoolnix and ffmpeg.
+
+## 13. The Go toolchain as the ad-hoc runtime
 
 The image carries the Go toolchain so one-off programs run in the pod, where every media
 write has to happen, the way a throwaway `.py` script did. `GOROOT` is `/usr/local/go`,

@@ -55,6 +55,8 @@ by convention — it is unrepresentable.
 | `mkv-split FILE PREFIX CH,CH` | split on chapter numbers, then verify the result |
 | `mkv-archive MANIFEST.json [--go]` | move superseded library files into `$ARCHIVE_ROOT/`, layout preserved |
 | `mkv-promote MANIFEST.json [--go]` | move verified files into the library, with accounting |
+| `mkv-manifest check\|exec MANIFEST [--go]` | replay a manifest of ops against the library, then perform it: renames, archive moves, remux, titles, track flags |
+| `mkv-manifest gen rename-series\|archive-tree …` | print a manifest for a series rename or an archive-tree move |
 | `mkv-order INVENTORY.jsonl SERIES` | prove a disc's track order IS episode order, from its Play-All |
 | `mkv-anilist "<search>"` | episode counts and titles from AniList |
 | `mkv-fingerprint batch\|match` | prove episode adjacency from next-episode previews |
@@ -65,7 +67,9 @@ by convention — it is unrepresentable.
 | `mkv-rip start\|identify\|status\|wait\|list\|finalize\|stop` | staggered disc ripping into `_pending`, verified, with a manifest; `identify` reads the discs' title tables; `finalize` re-verifies failed discs |
 
 Every mutating tool is **dry-run by default** and needs `--go` to act; `mkv-archive` and
-`mkv-promote` print one JSON report either way ([`SPEC.md` §11](SPEC.md#11-library-moves-mkv-archive-and-mkv-promote)). The exception is
+`mkv-promote` print one JSON report either way ([`SPEC.md` §11](SPEC.md#11-library-moves-mkv-archive-and-mkv-promote)), as does
+`mkv-manifest exec`, which runs `check` first on every invocation, dry or not, and refuses on
+any finding ([`SPEC.md` §12](SPEC.md#12-manifest-runs-mkv-manifest)). The exception is
 `mkv-rip`, which only ever writes new `.partial` directories and refuses to touch an
 existing destination.
 
@@ -179,7 +183,7 @@ staging tree is not a real mount.
 
 ## Development
 
-`mkv-drives`, `mkv-rip`, `mkv-archive` and `mkv-promote` are Go (`cmd/`, with shared code in `kit/` and `internal/`);
+`mkv-drives`, `mkv-rip`, `mkv-archive`, `mkv-promote` and `mkv-manifest` are Go (`cmd/`, with shared code in `kit/` and `internal/`);
 the other tools are still under `scripts/` and move over a tool at a time, in the same
 commit that deletes the script. A tool exists in one language only: CI fails if a name
 is in both `scripts/` and `cmd/`.
@@ -210,7 +214,31 @@ The template imports `kit/`, the packages the tools are built from (`proc`, `ffp
 `mkvtool`, `fsutil`, `paths`). Anything outside the standard library, `kit` and
 `golang.org/x/sys` fails to compile rather than download. The compile cache is on `/work`,
 so the first run after a pod roll pays a few seconds and later ones are sub-second. See
-[`SPEC.md` §12](SPEC.md#12-the-go-toolchain-as-the-ad-hoc-runtime).
+[`SPEC.md` §13](SPEC.md#13-the-go-toolchain-as-the-ad-hoc-runtime).
+
+## Running a manifest
+
+`mkv-manifest` takes a manifest of ops (`rename`, `archive_file`, `remux`, `title`, `flags`,
+`audio_lang`, `rmdir_if_empty`, and the rest in [`SPEC.md` §12](SPEC.md#12-manifest-runs-mkv-manifest))
+with absolute paths: `MEDIA_ROOT` for everything but archive destinations, which must lie
+under `ARCHIVE_ROOT`. Write it into the job's plan dir on the NAS, because the journal is
+written beside it and that is what lets a rerun resume after a pod roll:
+
+```bash
+mkv-manifest gen rename-series /mnt/media/<share>/anime/Show Show > "$PLAN/rename.json"   # or write one by hand
+mkv-manifest check "$PLAN/rename.json"        # every finding at once; exit 1 if any
+mkv-manifest exec "$PLAN/rename.json"         # dry run: check, then the plan; touches nothing
+mkv-manifest exec "$PLAN/rename.json" --go    # check again, then perform, journaled
+```
+
+A failure or a stopped run leaves the journal behind; run the same `exec --go` again and it
+skips what is done and settles whatever was in flight from what is on disk. Edit the
+manifest after ops were applied and it refuses, because the journal belongs to the old
+one. A long run should survive a dropped `kubectl exec`:
+
+```bash
+setsid nohup mkv-manifest exec "$PLAN/rename.json" --go </dev/null >"$PLAN/run.log" 2>&1 &
+```
 
 ## The one thing to remember
 
