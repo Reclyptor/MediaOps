@@ -14,7 +14,7 @@ var ErrRefused = errors.New("refused")
 // allowed is every program the toolset may start.
 var allowed = map[string]bool{
 	"makemkvcon": true, "mkvpropedit": true, "mkvmerge": true,
-	"ffprobe": true, "ffmpeg": true,
+	"ffprobe": true, "ffmpeg": true, "mkvextract": true,
 	"sg_turs": true, "sg_prevent": true, "sg_start": true,
 	"dmesg": true,
 }
@@ -39,6 +39,8 @@ func Check(argv []string) error {
 		return checkFFmpeg(argv[1:])
 	case "mkvmerge":
 		return checkMkvmerge(argv[1:])
+	case "mkvextract":
+		return checkMkvextract(argv[1:])
 	}
 	return nil
 }
@@ -92,4 +94,13 @@ func checkMkvmerge(args []string) error {
 		}
 	}
 	return fmt.Errorf("proc: %w: mkvmerge is only allowed to identify, remux or split", ErrRefused)
+}
+
+// checkMkvextract allows exactly `mkvextract FILE tags OUT`. Track extraction
+// writes media out of the container, which nothing in the toolset needs.
+func checkMkvextract(args []string) error {
+	if len(args) != 3 || args[1] != "tags" {
+		return fmt.Errorf("proc: %w: mkvextract is only allowed as `mkvextract FILE tags OUT`", ErrRefused)
+	}
+	return nil
 }

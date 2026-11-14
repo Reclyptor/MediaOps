@@ -157,6 +157,12 @@ func TestNoEncoderArgv(t *testing.T) {
 		{"ffmpeg"},
 		{"mkvmerge", "--version"},
 		{"mkvmerge"},
+		{"mkvextract", "f.mkv", "tracks", "0:out.srt"},
+		{"mkvextract", "f.mkv", "tags"},
+		{"mkvextract", "f.mkv", "tags", "out.xml", "extra"},
+		{"mkvextract", "tags", "f.mkv", "out.xml"},
+		{"mkvextract", "f.mkv"},
+		{"mkvextract"},
 	}
 	for _, argv := range refused {
 		if err := Check(argv); !errors.Is(err, ErrRefused) {
@@ -172,6 +178,7 @@ func TestNoEncoderArgv(t *testing.T) {
 		{"mkvmerge", "-J", "in.mkv"},
 		{"mkvmerge", "--identify", "in.mkv"},
 		{"mkvmerge", "-o", "out.mkv", "--split", "chapters:2", "in.mkv"},
+		{"mkvextract", "in.mkv", "tags", "/dev/stdout"},
 	}
 	for _, argv := range allowedArgv {
 		if err := Check(argv); err != nil {
