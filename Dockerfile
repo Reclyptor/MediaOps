@@ -211,7 +211,9 @@ RUN chmod 0755 /opt/mediaops/bin/* \
 # ENTRYPOINT, so neither can set a umask for exec'd work. Coverage is therefore
 # per-caller:
 #   - the Go mkv-* tools      -> they set it at start (internal/cli)
-#   - the python mkv-* tools  -> os.umask(0o007) in mkvlib.py, which they all import
+#   - mkv-split-ts.py         -> os.umask(0o007) in mkvlib.py, which it imports
+#                                (mkv-fingerprint, mkv-dupcheck and mkv-staticcheck
+#                                import nothing that sets it; phase 5 ports them)
 #   - mkv-frames, mkv-titlescan -> `umask 0007` in the script
 #   - `kubectl exec -- bash -c` -> BASH_ENV below, which bash sources even
 #                                  non-interactively
