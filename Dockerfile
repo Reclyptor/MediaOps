@@ -192,7 +192,13 @@ RUN chmod 0755 /opt/mediaops/bin/* \
  && /opt/mediaops/bin/mkv-drives --version \
  && /opt/mediaops/bin/mkv-archive --version \
  && /opt/mediaops/bin/mkv-promote --version \
- && /opt/mediaops/bin/mkv-manifest --version
+ && /opt/mediaops/bin/mkv-manifest --version \
+ && /opt/mediaops/bin/mkv-probe --version \
+ && /opt/mediaops/bin/mkv-bounds --version \
+ && /opt/mediaops/bin/mkv-split --version \
+ && /opt/mediaops/bin/mkv-order --version \
+ && /opt/mediaops/bin/mkv-anilist --version \
+ && /opt/mediaops/bin/mkv-audit --version
 
 # The library convention is group-writable. The NFS export supplies the group by
 # squashing every client to 3000:3000, so files and directories carry gid 3000, not
