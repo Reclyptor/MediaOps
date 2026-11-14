@@ -1,0 +1,21 @@
+{
+ "ops": [
+  {
+   "kind": "title",
+   "path": "/mnt/media/nas/anime/Outlanders/Movies/Outlanders (1986) - S99E01.mkv",
+   "title": "Outlanders (1986)"
+  },
+  {
+   "kind": "flags",
+   "path": "/mnt/media/nas/anime/Outlanders/Movies/Outlanders (1986) - S99E01.mkv",
+   "audio_default": 1,
+   "sub_default": 3
+  },
+  {
+   "kind": "move_dir",
+   "src": "/mnt/media/nas2/featurettes/Outlanders (1986)",
+   "dst": "/mnt/media/nas/anime/Outlanders/Extras/Movies/Outlanders (1986)",
+   "why": "featurettes live on the second share, so this move crosses devices"
+  }
+ ]
+}

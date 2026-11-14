@@ -1,0 +1,326 @@
+{
+  "ops": [
+    {
+      "kind": "rename",
+      "src": "/mnt/media/nas/anime/Inuyasha/Movies/Inuyasha the Movie - Affections Touching Across Time (2001).mkv",
+      "dst": "/mnt/media/nas/anime/Inuyasha/Movies/Inuyasha - S99E01 - Inuyasha the Movie - Affections Touching Across Time (2001).mkv",
+      "title": "InuYasha the Movie: Affections Touching Across Time (2001)"
+    },
+    {
+      "kind": "rename",
+      "src": "/mnt/media/nas/anime/Inuyasha/Movies/Inuyasha the Movie - The Castle Beyond the Looking Glass (2002).mkv",
+      "dst": "/mnt/media/nas/anime/Inuyasha/Movies/Inuyasha - S99E02 - Inuyasha the Movie - The Castle Beyond the Looking Glass (2002).mkv",
+      "title": "InuYasha the Movie 2: The Castle Beyond the Looking Glass (2002)"
+    },
+    {
+      "kind": "rename",
+      "src": "/mnt/media/nas/anime/Inuyasha/Movies/Inuyasha the Movie - Swords of an Honorable Ruler (2003).mkv",
+      "dst": "/mnt/media/nas/anime/Inuyasha/Movies/Inuyasha - S99E03 - Inuyasha the Movie - Swords of an Honorable Ruler (2003).mkv",
+      "title": "InuYasha the Movie 3: Swords of an Honorable Ruler (2003)"
+    },
+    {
+      "kind": "rename",
+      "src": "/mnt/media/nas/anime/Inuyasha/Movies/Inuyasha the Movie - Fire on the Mystic Island (2004).mkv",
+      "dst": "/mnt/media/nas/anime/Inuyasha/Movies/Inuyasha - S99E04 - Inuyasha the Movie - Fire on the Mystic Island (2004).mkv",
+      "title": "InuYasha the Movie 4: Fire on the Mystic Island (2004)"
+    },
+    {
+      "kind": "rename",
+      "src": "/mnt/media/nas/anime/Rascal Does Not Dream of Bunny Girl Senpai/Movies/Rascal Does Not Dream of a Dreaming Girl (2019) - S99E01.mkv",
+      "dst": "/mnt/media/nas/anime/Rascal Does Not Dream of Bunny Girl Senpai/Movies/Rascal Does Not Dream of Bunny Girl Senpai - S99E01 - Rascal Does Not Dream of a Dreaming Girl (2019).mkv",
+      "title": "Rascal Does Not Dream of a Dreaming Girl (2019)"
+    },
+    {
+      "kind": "rename",
+      "src": "/mnt/media/nas/anime/Rascal Does Not Dream of Bunny Girl Senpai/Movies/Rascal Does Not Dream of a Sister Venturing Out (2023) - S99E02.mkv",
+      "dst": "/mnt/media/nas/anime/Rascal Does Not Dream of Bunny Girl Senpai/Movies/Rascal Does Not Dream of Bunny Girl Senpai - S99E02 - Rascal Does Not Dream of a Sister Venturing Out (2023).mkv",
+      "title": "Rascal Does Not Dream of a Sister Venturing Out (2023)"
+    },
+    {
+      "kind": "rename",
+      "src": "/mnt/media/nas/anime/Go! Princess Precure/Movies/Go! Princess Precure - Go! Go!! Gouka 3-bondate!!! (2015) - part1.mkv",
+      "dst": "/mnt/media/nas/anime/Go! Princess Precure/Movies/Go! Princess Precure - S99E01 - Go! Go!! Gouka 3-bondate!!! (2015) - part1.mkv",
+      "title": "Go! Princess Precure: Go! Go!! Gouka 3-bondate!!! (2015)"
+    },
+    {
+      "kind": "rename",
+      "src": "/mnt/media/nas/anime/Go! Princess Precure/Movies/Go! Princess Precure - Go! Go!! Gouka 3-bondate!!! (2015) - part2.mkv",
+      "dst": "/mnt/media/nas/anime/Go! Princess Precure/Movies/Go! Princess Precure - S99E01 - Go! Go!! Gouka 3-bondate!!! (2015) - part2.mkv",
+      "title": "Go! Princess Precure: Go! Go!! Gouka 3-bondate!!! (2015)"
+    },
+    {
+      "kind": "rename",
+      "src": "/mnt/media/nas/anime/Go! Princess Precure/Movies/Go! Princess Precure - Go! Go!! Gouka 3-bondate!!! (2015) - part3.mkv",
+      "dst": "/mnt/media/nas/anime/Go! Princess Precure/Movies/Go! Princess Precure - S99E01 - Go! Go!! Gouka 3-bondate!!! (2015) - part3.mkv",
+      "title": "Go! Princess Precure: Go! Go!! Gouka 3-bondate!!! (2015)"
+    },
+    {
+      "kind": "rename",
+      "src": "/mnt/media/nas/ecchi/Heaven's Lost Property/Movies/1. [KH] Heaven's Lost Property The Movie - The Angeloid of Clockwork/[KH] Heaven's Lost Property the Movie - The Angeloid of Clockwork - S99E01.mkv",
+      "dst": "/mnt/media/nas/ecchi/Heaven's Lost Property/Movies/Heaven's Lost Property - S99E01 - Heaven's Lost Property the Movie - The Angeloid of Clockwork (2011).mkv",
+      "title": "Heaven's Lost Property the Movie: The Angeloid of Clockwork (2011)"
+    },
+    {
+      "kind": "rename",
+      "src": "/mnt/media/nas/ecchi/Heaven's Lost Property/Movies/2. [KH] Heaven's Lost Property Final - Eternal My Master/[KH] Heaven's Lost Property Final - Eternal My Master - S99E02.mkv",
+      "dst": "/mnt/media/nas/ecchi/Heaven's Lost Property/Movies/Heaven's Lost Property - S99E02 - Heaven's Lost Property Final – The Movie - Eternally My Master (2014).mkv",
+      "title": "Heaven's Lost Property Final – The Movie: Eternally My Master (2014)"
+    },
+    {
+      "kind": "rename",
+      "src": "/mnt/media/nas/anime/Expelled from Paradise/[KTXP&philosophy-raws&VCB-Studio] Rakuen Tsuihou -Expelled From Paradise- [Hi10p_1080p][x264_flac].mkv",
+      "dst": "/mnt/media/nas/anime/Expelled from Paradise/Movies/Expelled from Paradise - S99E01 - Expelled from Paradise (2014).mkv",
+      "title": "Expelled From Paradise (2014)"
+    },
+    {
+      "kind": "rename_dir",
+      "src": "/mnt/media/nas/anime/Megaman Battle Network - Program of Light and Darkness (2005)",
+      "dst": "/mnt/media/nas/anime/Megaman Battle Network"
+    },
+    {
+      "kind": "rename",
+      "src": "/mnt/media/nas/anime/Megaman Battle Network/Megaman Battle Network - Program of Light and Darkness (2005).mkv",
+      "dst": "/mnt/media/nas/anime/Megaman Battle Network/Movies/Megaman Battle Network - S99E01 - Program of Light and Darkness (2005).mkv",
+      "title": "Rockman. EXE Movie: Programs of Light and Darkness (2005)"
+    },
+    {
+      "kind": "rename_dir",
+      "src": "/mnt/media/nas/ecchi/Kite Liberator (2008)",
+      "dst": "/mnt/media/nas/ecchi/Kite Liberator"
+    },
+    {
+      "kind": "rename",
+      "src": "/mnt/media/nas/ecchi/Kite Liberator/Kite Liberator (2008).mkv",
+      "dst": "/mnt/media/nas/ecchi/Kite Liberator/Movies/Kite Liberator - S99E01 - Kite Liberator (2008).mkv",
+      "title": "Kite Liberator (2008)"
+    },
+    {
+      "kind": "archive_dir",
+      "src": "/mnt/media/nas/anime/Fate Grand Order Divine Realm of the Round Table - Camelot - Paladin; Agateram (2021)",
+      "dst": "/mnt/media/nas2/archive/anime/Fate Grand Order Divine Realm of the Round Table - Camelot - Paladin; Agateram (2021)",
+      "why": "byte-identical duplicate (same segment UID) of anime/Fate Grand Order/Movies/…Agateram (2021).mkv"
+    },
+    {
+      "kind": "archive_dir",
+      "src": "/mnt/media/nas/ecchi/Virgin Punk - Clockwork Girl (2025)",
+      "dst": "/mnt/media/nas2/archive/ecchi/Virgin Punk - Clockwork Girl (2025)",
+      "why": "HEVC encode superseded by the MakeMKV remux at anime/Virgin Punk - Clockwork Girl/Movies/"
+    },
+    {
+      "kind": "archive_file",
+      "src": "/mnt/media/nas/anime/Fate Stay Night/Movies/Fate Stay Night - S99E01 - Heaven's Feel I - Presage Flower (2017).mkv",
+      "dst": "/mnt/media/nas2/archive/anime/Fate Stay Night/Movies/Fate Stay Night - S99E01 - Heaven's Feel I - Presage Flower (2017).mkv",
+      "why": "HEVC encode superseded by the MakeMKV remux from anime/Fate Stay Night - Heaven's Feel/"
+    },
+    {
+      "kind": "rename",
+      "src": "/mnt/media/nas/anime/Fate Stay Night - Heaven's Feel/Fate Stay Night - Heaven's Feel I. presage flower - S01E01.mkv",
+      "dst": "/mnt/media/nas/anime/Fate Stay Night/Movies/Fate Stay Night - S99E01 - Heaven's Feel I. presage flower (2017).mkv",
+      "title": "Fate/stay night [Heaven's Feel] I. presage flower (2017)"
+    },
+    {
+      "kind": "archive_file",
+      "src": "/mnt/media/nas/anime/Fate Stay Night/Movies/Fate Stay Night - S99E02 - Heaven's Feel II - Lost Butterfly (2019).mkv",
+      "dst": "/mnt/media/nas2/archive/anime/Fate Stay Night/Movies/Fate Stay Night - S99E02 - Heaven's Feel II - Lost Butterfly (2019).mkv",
+      "why": "HEVC encode superseded by the MakeMKV remux from anime/Fate Stay Night - Heaven's Feel/"
+    },
+    {
+      "kind": "rename",
+      "src": "/mnt/media/nas/anime/Fate Stay Night - Heaven's Feel/Fate Stay Night - Heaven's Feel II. lost butterfly - S01E02.mkv",
+      "dst": "/mnt/media/nas/anime/Fate Stay Night/Movies/Fate Stay Night - S99E02 - Heaven's Feel II. lost butterfly (2019).mkv",
+      "title": "Fate/stay night [Heaven's Feel] II. lost butterfly (2019)"
+    },
+    {
+      "kind": "archive_file",
+      "src": "/mnt/media/nas/anime/Fate Stay Night/Movies/Fate Stay Night - S99E03 - Heaven's Feel III - Spring Song (2020).mkv",
+      "dst": "/mnt/media/nas2/archive/anime/Fate Stay Night/Movies/Fate Stay Night - S99E03 - Heaven's Feel III - Spring Song (2020).mkv",
+      "why": "HEVC encode superseded by the MakeMKV remux from anime/Fate Stay Night - Heaven's Feel/"
+    },
+    {
+      "kind": "rename",
+      "src": "/mnt/media/nas/anime/Fate Stay Night - Heaven's Feel/Fate Stay Night - Heaven's Feel III. spring song - S01E03.mkv",
+      "dst": "/mnt/media/nas/anime/Fate Stay Night/Movies/Fate Stay Night - S99E03 - Heaven's Feel III. spring song (2020).mkv",
+      "title": "Fate/stay night [Heaven's Feel] III. spring song (2020)"
+    },
+    {
+      "kind": "remux",
+      "src": "/mnt/media/nas/anime/GHOST in the SHELL/Movies/Extras/Ghost in the Shell - CM1 (1080p).mp4",
+      "dst": "/mnt/media/nas/anime/GHOST in the SHELL/Extras/Movies/Ghost in the Shell/Ghost in the Shell - CM1 (1080p).mkv",
+      "title": "GHOST in the SHELL",
+      "archive_dst": "/mnt/media/nas2/archive/anime/GHOST in the SHELL/Movies/Extras/Ghost in the Shell - CM1 (1080p).mp4"
+    },
+    {
+      "kind": "rename",
+      "src": "/mnt/media/nas/anime/GHOST in the SHELL/Movies/Extras/Ghost in the Shell - CM2a (1080p).mkv",
+      "dst": "/mnt/media/nas/anime/GHOST in the SHELL/Extras/Movies/Ghost in the Shell/Ghost in the Shell - CM2a (1080p).mkv",
+      "title": "GHOST in the SHELL"
+    },
+    {
+      "kind": "remux",
+      "src": "/mnt/media/nas/anime/GHOST in the SHELL/Movies/Extras/Ghost in the Shell - CM2b (1080p).mp4",
+      "dst": "/mnt/media/nas/anime/GHOST in the SHELL/Extras/Movies/Ghost in the Shell/Ghost in the Shell - CM2b (1080p).mkv",
+      "title": "GHOST in the SHELL",
+      "archive_dst": "/mnt/media/nas2/archive/anime/GHOST in the SHELL/Movies/Extras/Ghost in the Shell - CM2b (1080p).mp4"
+    },
+    {
+      "kind": "remux",
+      "src": "/mnt/media/nas/anime/GHOST in the SHELL/Movies/Extras/Ghost in the Shell - CM3 (1080p).mp4",
+      "dst": "/mnt/media/nas/anime/GHOST in the SHELL/Extras/Movies/Ghost in the Shell/Ghost in the Shell - CM3 (1080p).mkv",
+      "title": "GHOST in the SHELL",
+      "archive_dst": "/mnt/media/nas2/archive/anime/GHOST in the SHELL/Movies/Extras/Ghost in the Shell - CM3 (1080p).mp4"
+    },
+    {
+      "kind": "remux",
+      "src": "/mnt/media/nas/anime/GHOST in the SHELL/Movies/Extras/Ghost in the Shell - Reborn (1080p).mp4",
+      "dst": "/mnt/media/nas/anime/GHOST in the SHELL/Extras/Movies/Ghost in the Shell/Ghost in the Shell - Reborn (1080p).mkv",
+      "title": "GHOST in the SHELL",
+      "archive_dst": "/mnt/media/nas2/archive/anime/GHOST in the SHELL/Movies/Extras/Ghost in the Shell - Reborn (1080p).mp4"
+    },
+    {
+      "kind": "remux",
+      "src": "/mnt/media/nas/anime/GHOST in the SHELL/Movies/Extras/Ghost in the Shell - SP (1080p).mp4",
+      "dst": "/mnt/media/nas/anime/GHOST in the SHELL/Extras/Movies/Ghost in the Shell/Ghost in the Shell - SP (1080p).mkv",
+      "title": "GHOST in the SHELL",
+      "archive_dst": "/mnt/media/nas2/archive/anime/GHOST in the SHELL/Movies/Extras/Ghost in the Shell - SP (1080p).mp4"
+    },
+    {
+      "kind": "rename",
+      "src": "/mnt/media/nas/anime/Tonagura!/Movies/Tonagura! - Tonagura! - S99E01.mkv",
+      "dst": "/mnt/media/nas/anime/Tonagura!/Extras/Tonagura!_t02.mkv",
+      "title": "Tonagura!"
+    },
+    {
+      "kind": "remux",
+      "src": "/mnt/media/nas/anime/Bleach/Movies/Bleach - S99E01 - Memories of Nobody (2006).avi",
+      "dst": "/mnt/media/nas/anime/Bleach/Movies/Bleach - S99E01 - Memories of Nobody (2006).mkv",
+      "title": "Bleach the Movie: Memories of Nobody (2006)",
+      "archive_dst": "/mnt/media/nas2/archive/anime/Bleach/Movies/Bleach - S99E01 - Memories of Nobody (2006).avi"
+    },
+    {
+      "kind": "remux",
+      "src": "/mnt/media/nas/anime/Bleach/Movies/Bleach - S99E02 - The DiamondDust Rebellion (2007).avi",
+      "dst": "/mnt/media/nas/anime/Bleach/Movies/Bleach - S99E02 - The DiamondDust Rebellion (2007).mkv",
+      "title": "Bleach the Movie: The DiamondDust Rebellion (2007)",
+      "archive_dst": "/mnt/media/nas2/archive/anime/Bleach/Movies/Bleach - S99E02 - The DiamondDust Rebellion (2007).avi"
+    },
+    {
+      "kind": "remux",
+      "src": "/mnt/media/nas/anime/Bleach/Movies/Bleach - S99E03 - Fade to Black (2008).avi",
+      "dst": "/mnt/media/nas/anime/Bleach/Movies/Bleach - S99E03 - Fade to Black (2008).mkv",
+      "title": "Bleach the Movie: Fade to Black (2008)",
+      "archive_dst": "/mnt/media/nas2/archive/anime/Bleach/Movies/Bleach - S99E03 - Fade to Black (2008).avi"
+    },
+    {
+      "kind": "archive_dir",
+      "src": "/mnt/media/nas/anime/Fate Stay Night - Unlimited Blade Works",
+      "dst": "/mnt/media/nas2/archive/anime/Fate Stay Night - Unlimited Blade Works",
+      "why": "[Arid] HEVC encode superseded by the [FateSucks] BD remux at anime/Fate stay night - Unlimited Blade Works/"
+    },
+    {
+      "kind": "title",
+      "path": "/mnt/media/nas/anime/Attack on Titan/Movies/Attack on Titan - S99E01 - Guren no Yumiya (2014).mkv",
+      "title": "Attack on Titan Part I: Crimson Bow and Arrow (2014)"
+    },
+    {
+      "kind": "title",
+      "path": "/mnt/media/nas/anime/Attack on Titan/Movies/Attack on Titan - S99E02 - Jiyuu no Tsubasa (2015).mkv",
+      "title": "Attack on Titan Part II: Wings of Freedom (2015)"
+    },
+    {
+      "kind": "title",
+      "path": "/mnt/media/nas/anime/Attack on Titan/Movies/Attack on Titan - S99E03 - Kakusei no Houkou (2018).mkv",
+      "title": "Attack on Titan: The Roar of Awakening (2018)"
+    },
+    {
+      "kind": "title",
+      "path": "/mnt/media/nas/anime/Attack on Titan/Movies/Attack on Titan - S99E04 - Chronicle (2020).mkv",
+      "title": "Attack on Titan ~Chronicle~ (2020)"
+    },
+    {
+      "kind": "title",
+      "path": "/mnt/media/nas/anime/Bleach/Movies/Bleach - S99E04 - Hell Verse (2010).mkv",
+      "title": "Bleach the Movie: Hell Verse (2010)"
+    },
+    {
+      "kind": "title",
+      "path": "/mnt/media/nas/anime/Fate Grand Order/Movies/Fate Grand Order - S99E01 - Divine Realm of the Round Table - Camelot - Paladin; Agateram (2021).mkv",
+      "title": "Fate/Grand Order Divine Realm of the Round Table: Camelot - Paladin; Agateram (2021)"
+    },
+    {
+      "kind": "title",
+      "path": "/mnt/media/nas/anime/Rebuild of Evangelion/Movies/Rebuild of Evangelion - S99E01 - Evangelion 1.11 - You Are (Not) Alone (2007).mkv",
+      "title": "Evangelion: 1.11 You Are (Not) Alone (2007)"
+    },
+    {
+      "kind": "title",
+      "path": "/mnt/media/nas/anime/Rebuild of Evangelion/Movies/Rebuild of Evangelion - S99E02 - Evangelion 2.22 - You Can (Not) Advance (2009).mkv",
+      "title": "Evangelion: 2.22 You Can (Not) Advance (2009)"
+    },
+    {
+      "kind": "title",
+      "path": "/mnt/media/nas/anime/Rebuild of Evangelion/Movies/Rebuild of Evangelion - S99E03 - Evangelion 3.33 - You Can (Not) Redo (2012).mkv",
+      "title": "Evangelion: 3.33 You Can (Not) Redo (2012)"
+    },
+    {
+      "kind": "title",
+      "path": "/mnt/media/nas/anime/Rebuild of Evangelion/Movies/Rebuild of Evangelion - S99E04 - Evangelion 3.0+1.11 - Thrice Upon A Time (2021).mkv",
+      "title": "Evangelion: 3.0+1.11 Thrice Upon a Time (2021)"
+    },
+    {
+      "kind": "title",
+      "path": "/mnt/media/nas/anime/Saint Seiya/Movies/Saint Seiya - S99E01 - Evil Goddess Eris (1987).mkv",
+      "title": "Saint Seiya: Evil Goddess Eris (1987)"
+    },
+    {
+      "kind": "title",
+      "path": "/mnt/media/nas/anime/Saint Seiya/Movies/Saint Seiya - S99E02 - The Heated Battle of the Gods (1988).mkv",
+      "title": "Saint Seiya: The Heated Battle of the Gods (1988)"
+    },
+    {
+      "kind": "title",
+      "path": "/mnt/media/nas/anime/Saint Seiya/Movies/Saint Seiya - S99E03 - Legend of Crimson Youth (1988).mkv",
+      "title": "Saint Seiya: Legend of Crimson Youth (1988)"
+    },
+    {
+      "kind": "title",
+      "path": "/mnt/media/nas/anime/Saint Seiya/Movies/Saint Seiya - S99E05 - Heaven Chapter Overture (2004).mkv",
+      "title": "Saint Seiya: The Heaven Chapter - Overture (2004)"
+    },
+    {
+      "kind": "title",
+      "path": "/mnt/media/nas/anime/Saint Seiya/Movies/Saint Seiya - S99E06 - Legend of Sanctuary (2014).mkv",
+      "title": "Saint Seiya: Legend of Sanctuary (2014)"
+    },
+    {
+      "kind": "title",
+      "path": "/mnt/media/nas/anime/Saint Seiya/Movies/Saint Seiya - S99E04 - Warriors of the Final Holy Battle (1989).mkv",
+      "title": "Saint Seiya: Warriors of the Final Holy Battle (1989)"
+    },
+    {
+      "kind": "rmdir_if_empty",
+      "path": "/mnt/media/nas/anime/GHOST in the SHELL/Movies/Extras"
+    },
+    {
+      "kind": "rmdir_if_empty",
+      "path": "/mnt/media/nas/ecchi/Heaven's Lost Property/Movies/1. [KH] Heaven's Lost Property The Movie - The Angeloid of Clockwork"
+    },
+    {
+      "kind": "rmdir_if_empty",
+      "path": "/mnt/media/nas/ecchi/Heaven's Lost Property/Movies/2. [KH] Heaven's Lost Property Final - Eternal My Master"
+    },
+    {
+      "kind": "rmdir_if_empty",
+      "path": "/mnt/media/nas/anime/Fate Stay Night - Heaven's Feel"
+    },
+    {
+      "kind": "rmdir_if_empty",
+      "path": "/mnt/media/nas/anime/Tonagura!/Movies"
+    },
+    {
+      "kind": "move_dir",
+      "src": "/mnt/media/nas/anime/Tonagura!",
+      "dst": "/mnt/media/nas/_pending/anime/Tonagura!",
+      "why": "13-ep series is an unsplit 308-min Play-All in Extras/_t01; needs the split pipeline"
+    }
+  ]
+}

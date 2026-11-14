@@ -1,0 +1,415 @@
+{
+  "ops": [
+    {
+      "kind": "rename",
+      "src": "/mnt/media/nas/_pending/anime/_plans/20261110-penguindrum/split/d01-001.mkv",
+      "dst": "/mnt/media/nas/anime/Penguindrum/Season 01/Penguindrum - S01E01 - Ringing the Bell of Destiny.mkv",
+      "title": "Penguindrum"
+    },
+    {
+      "kind": "rename",
+      "src": "/mnt/media/nas/_pending/anime/_plans/20261110-penguindrum/split/d01-002.mkv",
+      "dst": "/mnt/media/nas/anime/Penguindrum/Season 01/Penguindrum - S01E02 - Risky Survival Strategy.mkv",
+      "title": "Penguindrum"
+    },
+    {
+      "kind": "rename",
+      "src": "/mnt/media/nas/_pending/anime/_plans/20261110-penguindrum/split/d01-003.mkv",
+      "dst": "/mnt/media/nas/anime/Penguindrum/Season 01/Penguindrum - S01E03 - Then Devour Me Courageously.mkv",
+      "title": "Penguindrum"
+    },
+    {
+      "kind": "rename",
+      "src": "/mnt/media/nas/_pending/anime/_plans/20261110-penguindrum/split/d01-004.mkv",
+      "dst": "/mnt/media/nas/anime/Penguindrum/Season 01/Penguindrum - S01E04 - Descension of a Princess.mkv",
+      "title": "Penguindrum"
+    },
+    {
+      "kind": "rename",
+      "src": "/mnt/media/nas/_pending/anime/_plans/20261110-penguindrum/split/d01-005.mkv",
+      "dst": "/mnt/media/nas/anime/Penguindrum/Season 01/Penguindrum - S01E05 - This is What Drives Me.mkv",
+      "title": "Penguindrum"
+    },
+    {
+      "kind": "rename",
+      "src": "/mnt/media/nas/_pending/anime/_plans/20261110-penguindrum/split/d01-006.mkv",
+      "dst": "/mnt/media/nas/anime/Penguindrum/Season 01/Penguindrum - S01E06 - You and I are Bound by M.mkv",
+      "title": "Penguindrum"
+    },
+    {
+      "kind": "rename",
+      "src": "/mnt/media/nas/_pending/anime/_plans/20261110-penguindrum/split/d01-007.mkv",
+      "dst": "/mnt/media/nas/anime/Penguindrum/Season 01/Penguindrum - S01E07 - The Eggchanting Girl.mkv",
+      "title": "Penguindrum"
+    },
+    {
+      "kind": "rename",
+      "src": "/mnt/media/nas/_pending/anime/_plans/20261110-penguindrum/split/d01-008.mkv",
+      "dst": "/mnt/media/nas/anime/Penguindrum/Season 01/Penguindrum - S01E08 - Even if Your Love is a Lie, I....mkv",
+      "title": "Penguindrum"
+    },
+    {
+      "kind": "rename",
+      "src": "/mnt/media/nas/_pending/anime/_plans/20261110-penguindrum/split/d01-009.mkv",
+      "dst": "/mnt/media/nas/anime/Penguindrum/Extras/Season 01/Disc 01/Penguindrum - Blu-ray Credits.mkv",
+      "title": "Penguindrum"
+    },
+    {
+      "kind": "rename",
+      "src": "/mnt/media/nas/_pending/anime/Penguindrum/Season 01/Disc 01/PENGUINDRUM - Disc 1_t00.mkv",
+      "dst": "/mnt/media/nas/anime/Penguindrum/Extras/Season 01/Disc 01/PENGUINDRUM - Disc 1_t00.mkv",
+      "title": "Penguindrum"
+    },
+    {
+      "kind": "rename",
+      "src": "/mnt/media/nas/_pending/anime/Penguindrum/Season 01/Disc 01/PENGUINDRUM - Disc 1_t01.mkv",
+      "dst": "/mnt/media/nas/anime/Penguindrum/Extras/Season 01/Disc 01/PENGUINDRUM - Disc 1_t01.mkv",
+      "title": "Penguindrum"
+    },
+    {
+      "kind": "rename",
+      "src": "/mnt/media/nas/_pending/anime/Penguindrum/Season 01/Disc 01/PENGUINDRUM - Disc 1_t02.mkv",
+      "dst": "/mnt/media/nas/anime/Penguindrum/Extras/Season 01/Disc 01/PENGUINDRUM - Disc 1_t02.mkv",
+      "title": "Penguindrum"
+    },
+    {
+      "kind": "rename",
+      "src": "/mnt/media/nas/_pending/anime/Penguindrum/Season 01/Disc 01/manifest.json",
+      "dst": "/mnt/media/nas/_pending/anime/_plans/20261110-penguindrum/rip-manifest-disc-01.json"
+    },
+    {
+      "kind": "rename",
+      "src": "/mnt/media/nas/_pending/anime/_plans/20261110-penguindrum/split/d02-001.mkv",
+      "dst": "/mnt/media/nas/anime/Penguindrum/Season 01/Penguindrum - S01E09 - Frozen World.mkv",
+      "title": "Penguindrum"
+    },
+    {
+      "kind": "rename",
+      "src": "/mnt/media/nas/_pending/anime/_plans/20261110-penguindrum/split/d02-002.mkv",
+      "dst": "/mnt/media/nas/anime/Penguindrum/Season 01/Penguindrum - S01E10 - Because I Love Him.mkv",
+      "title": "Penguindrum"
+    },
+    {
+      "kind": "rename",
+      "src": "/mnt/media/nas/_pending/anime/_plans/20261110-penguindrum/split/d02-003.mkv",
+      "dst": "/mnt/media/nas/anime/Penguindrum/Season 01/Penguindrum - S01E11 - You Have Finally Realized It.mkv",
+      "title": "Penguindrum"
+    },
+    {
+      "kind": "rename",
+      "src": "/mnt/media/nas/_pending/anime/_plans/20261110-penguindrum/split/d02-004.mkv",
+      "dst": "/mnt/media/nas/anime/Penguindrum/Season 01/Penguindrum - S01E12 - The Wheel That Spins Us Round.mkv",
+      "title": "Penguindrum"
+    },
+    {
+      "kind": "rename",
+      "src": "/mnt/media/nas/_pending/anime/_plans/20261110-penguindrum/split/d02-005.mkv",
+      "dst": "/mnt/media/nas/anime/Penguindrum/Season 01/Penguindrum - S01E13 - Our Crime & Punishment.mkv",
+      "title": "Penguindrum"
+    },
+    {
+      "kind": "rename",
+      "src": "/mnt/media/nas/_pending/anime/_plans/20261110-penguindrum/split/d02-006.mkv",
+      "dst": "/mnt/media/nas/anime/Penguindrum/Season 01/Penguindrum - S01E14 - Princess of Lies.mkv",
+      "title": "Penguindrum"
+    },
+    {
+      "kind": "rename",
+      "src": "/mnt/media/nas/_pending/anime/_plans/20261110-penguindrum/split/d02-007.mkv",
+      "dst": "/mnt/media/nas/anime/Penguindrum/Season 01/Penguindrum - S01E15 - Saving the World.mkv",
+      "title": "Penguindrum"
+    },
+    {
+      "kind": "rename",
+      "src": "/mnt/media/nas/_pending/anime/_plans/20261110-penguindrum/split/d02-008.mkv",
+      "dst": "/mnt/media/nas/anime/Penguindrum/Season 01/Penguindrum - S01E16 - Uncrushable Man.mkv",
+      "title": "Penguindrum"
+    },
+    {
+      "kind": "rename",
+      "src": "/mnt/media/nas/_pending/anime/_plans/20261110-penguindrum/split/d02-009.mkv",
+      "dst": "/mnt/media/nas/anime/Penguindrum/Extras/Season 01/Disc 02/Penguindrum - Blu-ray Credits.mkv",
+      "title": "Penguindrum"
+    },
+    {
+      "kind": "rename",
+      "src": "/mnt/media/nas/_pending/anime/Penguindrum/Season 01/Disc 02/PENGUINDRUM - Disc 2_t00.mkv",
+      "dst": "/mnt/media/nas/anime/Penguindrum/Extras/Season 01/Disc 02/PENGUINDRUM - Disc 2_t00.mkv",
+      "title": "Penguindrum"
+    },
+    {
+      "kind": "rename",
+      "src": "/mnt/media/nas/_pending/anime/Penguindrum/Season 01/Disc 02/PENGUINDRUM - Disc 2_t01.mkv",
+      "dst": "/mnt/media/nas/anime/Penguindrum/Extras/Season 01/Disc 02/PENGUINDRUM - Disc 2_t01.mkv",
+      "title": "Penguindrum"
+    },
+    {
+      "kind": "rename",
+      "src": "/mnt/media/nas/_pending/anime/Penguindrum/Season 01/Disc 02/manifest.json",
+      "dst": "/mnt/media/nas/_pending/anime/_plans/20261110-penguindrum/rip-manifest-disc-02.json"
+    },
+    {
+      "kind": "rename",
+      "src": "/mnt/media/nas/_pending/anime/_plans/20261110-penguindrum/split/d03-001.mkv",
+      "dst": "/mnt/media/nas/anime/Penguindrum/Season 01/Penguindrum - S01E17 - The Unforgiven.mkv",
+      "title": "Penguindrum"
+    },
+    {
+      "kind": "rename",
+      "src": "/mnt/media/nas/_pending/anime/_plans/20261110-penguindrum/split/d03-002.mkv",
+      "dst": "/mnt/media/nas/anime/Penguindrum/Season 01/Penguindrum - S01E18 - So Please be There for Me.mkv",
+      "title": "Penguindrum"
+    },
+    {
+      "kind": "rename",
+      "src": "/mnt/media/nas/_pending/anime/_plans/20261110-penguindrum/split/d03-003.mkv",
+      "dst": "/mnt/media/nas/anime/Penguindrum/Season 01/Penguindrum - S01E19 - My Soulmate.mkv",
+      "title": "Penguindrum"
+    },
+    {
+      "kind": "rename",
+      "src": "/mnt/media/nas/_pending/anime/_plans/20261110-penguindrum/split/d03-004.mkv",
+      "dst": "/mnt/media/nas/anime/Penguindrum/Season 01/Penguindrum - S01E20 - Thank You for Choosing Me.mkv",
+      "title": "Penguindrum"
+    },
+    {
+      "kind": "rename",
+      "src": "/mnt/media/nas/_pending/anime/_plans/20261110-penguindrum/split/d03-005.mkv",
+      "dst": "/mnt/media/nas/anime/Penguindrum/Season 01/Penguindrum - S01E21 - The Door of Fate We Choose.mkv",
+      "title": "Penguindrum"
+    },
+    {
+      "kind": "rename",
+      "src": "/mnt/media/nas/_pending/anime/_plans/20261110-penguindrum/split/d03-006.mkv",
+      "dst": "/mnt/media/nas/anime/Penguindrum/Season 01/Penguindrum - S01E22 - Beautiful Casket.mkv",
+      "title": "Penguindrum"
+    },
+    {
+      "kind": "rename",
+      "src": "/mnt/media/nas/_pending/anime/_plans/20261110-penguindrum/split/d03-007.mkv",
+      "dst": "/mnt/media/nas/anime/Penguindrum/Season 01/Penguindrum - S01E23 - The Destination of Fate.mkv",
+      "title": "Penguindrum"
+    },
+    {
+      "kind": "rename",
+      "src": "/mnt/media/nas/_pending/anime/_plans/20261110-penguindrum/split/d03-008.mkv",
+      "dst": "/mnt/media/nas/anime/Penguindrum/Season 01/Penguindrum - S01E24 - I Love You.mkv",
+      "title": "Penguindrum"
+    },
+    {
+      "kind": "rename",
+      "src": "/mnt/media/nas/_pending/anime/_plans/20261110-penguindrum/split/d03-009.mkv",
+      "dst": "/mnt/media/nas/anime/Penguindrum/Extras/Season 01/Disc 03/Penguindrum - Blu-ray Credits.mkv",
+      "title": "Penguindrum"
+    },
+    {
+      "kind": "rename",
+      "src": "/mnt/media/nas/_pending/anime/Penguindrum/Season 01/Disc 03/PENGUINDRUM - Disc 3_t00.mkv",
+      "dst": "/mnt/media/nas/anime/Penguindrum/Extras/Season 01/Disc 03/PENGUINDRUM - Disc 3_t00.mkv",
+      "title": "Penguindrum"
+    },
+    {
+      "kind": "rename",
+      "src": "/mnt/media/nas/_pending/anime/Penguindrum/Season 01/Disc 03/PENGUINDRUM - Disc 3_t01.mkv",
+      "dst": "/mnt/media/nas/anime/Penguindrum/Extras/Season 01/Disc 03/PENGUINDRUM - Disc 3_t01.mkv",
+      "title": "Penguindrum"
+    },
+    {
+      "kind": "rename",
+      "src": "/mnt/media/nas/_pending/anime/Penguindrum/Season 01/Disc 03/PENGUINDRUM - Disc 3_t02.mkv",
+      "dst": "/mnt/media/nas/anime/Penguindrum/Extras/Season 01/Disc 03/PENGUINDRUM - Disc 3_t02.mkv",
+      "title": "Penguindrum"
+    },
+    {
+      "kind": "rename",
+      "src": "/mnt/media/nas/_pending/anime/Penguindrum/Season 01/Disc 03/PENGUINDRUM - Disc 3_t03.mkv",
+      "dst": "/mnt/media/nas/anime/Penguindrum/Extras/Season 01/Disc 03/PENGUINDRUM - Disc 3_t03.mkv",
+      "title": "Penguindrum"
+    },
+    {
+      "kind": "rename",
+      "src": "/mnt/media/nas/_pending/anime/Penguindrum/Season 01/Disc 03/PENGUINDRUM - Disc 3_t04.mkv",
+      "dst": "/mnt/media/nas/anime/Penguindrum/Extras/Season 01/Disc 03/PENGUINDRUM - Disc 3_t04.mkv",
+      "title": "Penguindrum"
+    },
+    {
+      "kind": "rename",
+      "src": "/mnt/media/nas/_pending/anime/Penguindrum/Season 01/Disc 03/PENGUINDRUM - Disc 3_t05.mkv",
+      "dst": "/mnt/media/nas/anime/Penguindrum/Extras/Season 01/Disc 03/PENGUINDRUM - Disc 3_t05.mkv",
+      "title": "Penguindrum"
+    },
+    {
+      "kind": "rename",
+      "src": "/mnt/media/nas/_pending/anime/Penguindrum/Season 01/Disc 03/manifest.json",
+      "dst": "/mnt/media/nas/_pending/anime/_plans/20261110-penguindrum/rip-manifest-disc-03.json"
+    },
+    {
+      "kind": "flags",
+      "path": "/mnt/media/nas/anime/Penguindrum/Season 01/Penguindrum - S01E01 - Ringing the Bell of Destiny.mkv",
+      "audio_default": 2,
+      "sub_default": 4
+    },
+    {
+      "kind": "flags",
+      "path": "/mnt/media/nas/anime/Penguindrum/Season 01/Penguindrum - S01E02 - Risky Survival Strategy.mkv",
+      "audio_default": 2,
+      "sub_default": 4
+    },
+    {
+      "kind": "flags",
+      "path": "/mnt/media/nas/anime/Penguindrum/Season 01/Penguindrum - S01E03 - Then Devour Me Courageously.mkv",
+      "audio_default": 2,
+      "sub_default": 4
+    },
+    {
+      "kind": "flags",
+      "path": "/mnt/media/nas/anime/Penguindrum/Season 01/Penguindrum - S01E04 - Descension of a Princess.mkv",
+      "audio_default": 2,
+      "sub_default": 4
+    },
+    {
+      "kind": "flags",
+      "path": "/mnt/media/nas/anime/Penguindrum/Season 01/Penguindrum - S01E05 - This is What Drives Me.mkv",
+      "audio_default": 2,
+      "sub_default": 4
+    },
+    {
+      "kind": "flags",
+      "path": "/mnt/media/nas/anime/Penguindrum/Season 01/Penguindrum - S01E06 - You and I are Bound by M.mkv",
+      "audio_default": 2,
+      "sub_default": 4
+    },
+    {
+      "kind": "flags",
+      "path": "/mnt/media/nas/anime/Penguindrum/Season 01/Penguindrum - S01E07 - The Eggchanting Girl.mkv",
+      "audio_default": 2,
+      "sub_default": 4
+    },
+    {
+      "kind": "flags",
+      "path": "/mnt/media/nas/anime/Penguindrum/Season 01/Penguindrum - S01E08 - Even if Your Love is a Lie, I....mkv",
+      "audio_default": 2,
+      "sub_default": 4
+    },
+    {
+      "kind": "flags",
+      "path": "/mnt/media/nas/anime/Penguindrum/Season 01/Penguindrum - S01E09 - Frozen World.mkv",
+      "audio_default": 2,
+      "sub_default": 4
+    },
+    {
+      "kind": "flags",
+      "path": "/mnt/media/nas/anime/Penguindrum/Season 01/Penguindrum - S01E10 - Because I Love Him.mkv",
+      "audio_default": 2,
+      "sub_default": 4
+    },
+    {
+      "kind": "flags",
+      "path": "/mnt/media/nas/anime/Penguindrum/Season 01/Penguindrum - S01E11 - You Have Finally Realized It.mkv",
+      "audio_default": 2,
+      "sub_default": 4
+    },
+    {
+      "kind": "flags",
+      "path": "/mnt/media/nas/anime/Penguindrum/Season 01/Penguindrum - S01E12 - The Wheel That Spins Us Round.mkv",
+      "audio_default": 2,
+      "sub_default": 4
+    },
+    {
+      "kind": "flags",
+      "path": "/mnt/media/nas/anime/Penguindrum/Season 01/Penguindrum - S01E13 - Our Crime & Punishment.mkv",
+      "audio_default": 2,
+      "sub_default": 4
+    },
+    {
+      "kind": "flags",
+      "path": "/mnt/media/nas/anime/Penguindrum/Season 01/Penguindrum - S01E14 - Princess of Lies.mkv",
+      "audio_default": 2,
+      "sub_default": 4
+    },
+    {
+      "kind": "flags",
+      "path": "/mnt/media/nas/anime/Penguindrum/Season 01/Penguindrum - S01E15 - Saving the World.mkv",
+      "audio_default": 2,
+      "sub_default": 4
+    },
+    {
+      "kind": "flags",
+      "path": "/mnt/media/nas/anime/Penguindrum/Season 01/Penguindrum - S01E16 - Uncrushable Man.mkv",
+      "audio_default": 2,
+      "sub_default": 4
+    },
+    {
+      "kind": "flags",
+      "path": "/mnt/media/nas/anime/Penguindrum/Season 01/Penguindrum - S01E17 - The Unforgiven.mkv",
+      "audio_default": 2,
+      "sub_default": 4
+    },
+    {
+      "kind": "flags",
+      "path": "/mnt/media/nas/anime/Penguindrum/Season 01/Penguindrum - S01E18 - So Please be There for Me.mkv",
+      "audio_default": 2,
+      "sub_default": 4
+    },
+    {
+      "kind": "flags",
+      "path": "/mnt/media/nas/anime/Penguindrum/Season 01/Penguindrum - S01E19 - My Soulmate.mkv",
+      "audio_default": 2,
+      "sub_default": 4
+    },
+    {
+      "kind": "flags",
+      "path": "/mnt/media/nas/anime/Penguindrum/Season 01/Penguindrum - S01E20 - Thank You for Choosing Me.mkv",
+      "audio_default": 2,
+      "sub_default": 4
+    },
+    {
+      "kind": "flags",
+      "path": "/mnt/media/nas/anime/Penguindrum/Season 01/Penguindrum - S01E21 - The Door of Fate We Choose.mkv",
+      "audio_default": 2,
+      "sub_default": 4
+    },
+    {
+      "kind": "flags",
+      "path": "/mnt/media/nas/anime/Penguindrum/Season 01/Penguindrum - S01E22 - Beautiful Casket.mkv",
+      "audio_default": 2,
+      "sub_default": 4
+    },
+    {
+      "kind": "flags",
+      "path": "/mnt/media/nas/anime/Penguindrum/Season 01/Penguindrum - S01E23 - The Destination of Fate.mkv",
+      "audio_default": 2,
+      "sub_default": 4
+    },
+    {
+      "kind": "flags",
+      "path": "/mnt/media/nas/anime/Penguindrum/Season 01/Penguindrum - S01E24 - I Love You.mkv",
+      "audio_default": 2,
+      "sub_default": 4
+    },
+    {
+      "kind": "rmdir_if_empty",
+      "path": "/mnt/media/nas/_pending/anime/Penguindrum/Season 01/Disc 01"
+    },
+    {
+      "kind": "rmdir_if_empty",
+      "path": "/mnt/media/nas/_pending/anime/Penguindrum/Season 01/Disc 02"
+    },
+    {
+      "kind": "rmdir_if_empty",
+      "path": "/mnt/media/nas/_pending/anime/Penguindrum/Season 01/Disc 03"
+    },
+    {
+      "kind": "rmdir_if_empty",
+      "path": "/mnt/media/nas/_pending/anime/Penguindrum/Season 01"
+    },
+    {
+      "kind": "rmdir_if_empty",
+      "path": "/mnt/media/nas/_pending/anime/Penguindrum"
+    },
+    {
+      "kind": "rmdir_if_empty",
+      "path": "/mnt/media/nas/_pending/anime/_plans/20261110-penguindrum/split"
+    }
+  ]
+}

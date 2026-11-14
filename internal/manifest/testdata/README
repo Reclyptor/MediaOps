@@ -1,0 +1,52 @@
+Fixtures for internal/manifest. Each is a real manifest (or the real work of one
+plan dir) captured on 2026-11-13 from the plan directory
+videos/_pending/anime/_plans/ on the NAS (read only; nothing there was changed).
+
+Path rewrite applied to every string value in every fixture, in this order:
+  <staging share>/_archive/       -> /mnt/media/nas2/archive/
+  <second share>/archive/         -> /mnt/media/nas2/archive/
+  /mnt/media/<first share>/       -> /mnt/media/nas/
+  /mnt/media/<second share>/      -> /mnt/media/nas2/
+so the two real shares become the neutral shares nas and nas2 and every archive
+destination falls under one ARCHIVE_ROOT, /mnt/media/nas2/archive. The test
+helper buildFixture replaces /mnt/media with a temp MEDIA_ROOT.
+
+penguindrum.json
+  Source: 20261110-penguindrum/rename-manifest.json
+  Copied whole (71 ops: 41 rename with title, 24 flags, 6 rmdir_if_empty).
+  Transformation: the path rewrite only.
+
+films.json
+  Source: film-plan-v2.json (307 ops)
+  A coherent subset of 57 ops, in their original order, chosen as whole groups so
+  every dependency holds: Inuyasha, Rascal Does Not Dream, Go! Princess Precure
+  (part1-3), Heaven's Lost Property (with its emptied subfolders), Expelled from
+  Paradise, Megaman Battle Network and Kite Liberator (rename_dir then rename),
+  the Fate archive_dir/archive_file/rename group, Ghost in the Shell extras (five
+  remux, one rename, rmdir of Movies/Extras), Bleach (three remux and a title),
+  Fate Stay Night - Unlimited Blade Works (archive_dir), Fate Grand Order, Attack
+  on Titan, Rebuild of Evangelion, Saint Seiya, and Tonagura! (rename, rmdir,
+  move_dir). Kinds: rename 19, title 16, remux 8, rmdir_if_empty 5, archive_dir 3,
+  archive_file 3, rename_dir 2, move_dir 1.
+  Transformations: the subset selection; the top-level skipped_avi key dropped;
+  the per-op keys "extra" and "after_dir_rename" dropped (the schema refuses
+  unknown keys); "why" kept; the path rewrite.
+
+outlanders.json
+  Source: 2026-11-10-outlanders/run.sh. That job never had a manifest; its script
+  did the work by hand, so this fixture is the script translated into ops:
+    title      the film's segment title "Outlanders (1986)"
+    flags      audio_default 1, sub_default 3
+    move_dir   the featurettes folder on the second share to
+               nas/anime/Outlanders/Extras/Movies/Outlanders (1986)
+  The flags assume one video stream at ffprobe index 0: run.sh set track a1 and s1
+  as default, which are streams 1 and 3 when the video is stream 0 and a1, a2 are
+  followed by s1..s5. The move_dir crosses shares, which the Python move_dir could
+  not do (os.rename raised EXDEV). The script's sha256 listing, rsync and the
+  final chmod are not ops: the executor's tree read-back replaces the checksums.
+
+Tree generation (buildFixture): the fixtures describe moves, not the tree they
+act on, so the helper creates it: a file per file op or mkvpropedit target that
+no earlier op produces, a directory with two files per directory op, an empty
+directory per rmdir_if_empty target, and one episode under Season 01 for every
+series folder whose Movies/ the manifest fills, so --films audits it as a series.
