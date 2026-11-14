@@ -305,3 +305,62 @@ func TestUnlinkSourceNeedsAWholeCopy(t *testing.T) {
 		t.Fatalf("err = %v, source exists %v", err, exists(src))
 	}
 }
+
+func TestMoveRefusesItsOwnPartialAsSource(t *testing.T) {
+	dir := t.TempDir()
+	dst := filepath.Join(dir, "ep.mkv")
+	src := putFile(t, dst+partialSuffix, "precious bytes")
+	err := (Mover{Rename: exdev}).Move(context.Background(), src, dst)
+	if err == nil || !strings.Contains(err.Error(), "overwrite its own source") {
+		t.Fatalf("err = %v", err)
+	}
+	if got, _ := os.ReadFile(src); string(got) != "precious bytes" || exists(dst) {
+		t.Fatalf("source = %q, dst exists = %v", got, exists(dst))
+	}
+}
+
+func TestPlacePartial(t *testing.T) {
+	t.Run("places the partial at dst", func(t *testing.T) {
+		dst := filepath.Join(t.TempDir(), "ep.mkv")
+		putFile(t, dst+partialSuffix, "done")
+		if err := PlacePartial(dst); err != nil {
+			t.Fatal(err)
+		}
+		if got, _ := os.ReadFile(dst); string(got) != "done" || exists(dst+partialSuffix) {
+			t.Fatalf("dst = %q, partial left = %v", got, exists(dst+partialSuffix))
+		}
+	})
+	t.Run("dst exists leaves both untouched", func(t *testing.T) {
+		dst := filepath.Join(t.TempDir(), "ep.mkv")
+		putFile(t, dst, "old")
+		putFile(t, dst+partialSuffix, "new")
+		if err := PlacePartial(dst); !errors.Is(err, ErrExists) {
+			t.Fatalf("err = %v", err)
+		}
+		a, _ := os.ReadFile(dst)
+		b, _ := os.ReadFile(dst + partialSuffix)
+		if string(a) != "old" || string(b) != "new" {
+			t.Fatalf("dst = %q, partial = %q", a, b)
+		}
+	})
+	t.Run("missing partial", func(t *testing.T) {
+		dst := filepath.Join(t.TempDir(), "ep.mkv")
+		if err := PlacePartial(dst); err == nil || exists(dst) {
+			t.Fatalf("err = %v", err)
+		}
+	})
+	t.Run("a symlink partial is refused", func(t *testing.T) {
+		dir := t.TempDir()
+		dst := filepath.Join(dir, "ep.mkv")
+		real := putFile(t, filepath.Join(dir, "real.mkv"), "x")
+		if err := os.Symlink(real, dst+partialSuffix); err != nil {
+			t.Fatal(err)
+		}
+		if err := PlacePartial(dst); err == nil || exists(dst) {
+			t.Fatalf("err = %v", err)
+		}
+		if got, _ := os.ReadFile(real); string(got) != "x" {
+			t.Fatal("link target changed")
+		}
+	})
+}

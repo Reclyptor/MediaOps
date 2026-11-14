@@ -28,9 +28,9 @@ func unlinkSource(src, dst string, want int64) error {
 	return os.Remove(src)
 }
 
-// discardPartial removes the temporary copy of an interrupted move. Only a
+// DiscardPartial removes the temporary copy of an interrupted move. Only a
 // name ending in .partial is ever removed.
-func discardPartial(path string) error {
+func DiscardPartial(path string) error {
 	if len(path) <= len(partialSuffix) || path[len(path)-len(partialSuffix):] != partialSuffix {
 		return fmt.Errorf("refusing to discard %s: it is not a %s file", path, partialSuffix)
 	}
@@ -56,3 +56,18 @@ func removeProbe(path string) error {
 // rmdirEmpty removes dir if it is empty. unlinkat(AT_REMOVEDIR) can never
 // remove a file, whatever the path turns out to name.
 func rmdirEmpty(dir string) error { return unix.Rmdir(dir) }
+
+// RemoveDirIfEmpty removes dir when it is an empty directory. A directory that
+// is already gone or that still holds something is not a failure: removed is
+// false and the caller decides what that means. Anything else, a file at dir
+// included, is an error.
+func RemoveDirIfEmpty(dir string) (removed bool, err error) {
+	err = rmdirEmpty(dir)
+	switch {
+	case err == nil:
+		return true, nil
+	case errors.Is(err, unix.ENOENT), errors.Is(err, unix.ENOTEMPTY), errors.Is(err, unix.EEXIST):
+		return false, nil
+	}
+	return false, fmt.Errorf("removing the directory %s: %w", dir, err)
+}

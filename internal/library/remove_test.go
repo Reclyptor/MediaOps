@@ -25,8 +25,8 @@ func TestNoDeletionOutsideRemoveGo(t *testing.T) {
 
 	// What each file may call, by enclosing function.
 	allowed := map[string]map[string]bool{
-		"remove.go": {"unlinkSource": true, "discardPartial": true, "removeProbe": true, "rmdirEmpty": true},
-		"move.go":   {"rename": true, "copyAcross": true},
+		"remove.go": {"unlinkSource": true, "DiscardPartial": true, "removeProbe": true, "rmdirEmpty": true},
+		"move.go":   {"rename": true, "copyAcross": true, "PlacePartial": true},
 	}
 
 	dirs := []string{".", "../../cmd/mkv-archive", "../../cmd/mkv-promote"}
@@ -84,17 +84,17 @@ func TestNoDeletionOutsideRemoveGo(t *testing.T) {
 func TestDiscardPartialOnlyRemovesPartials(t *testing.T) {
 	dir := t.TempDir()
 	media := putFile(t, filepath.Join(dir, "ep.mkv"), "media")
-	if err := discardPartial(media); err == nil || !exists(media) {
-		t.Fatalf("discardPartial removed a non-partial: %v", err)
+	if err := DiscardPartial(media); err == nil || !exists(media) {
+		t.Fatalf("DiscardPartial removed a non-partial: %v", err)
 	}
-	if err := discardPartial(".partial"); err == nil {
-		t.Fatal("discardPartial accepted a bare suffix")
+	if err := DiscardPartial(".partial"); err == nil {
+		t.Fatal("DiscardPartial accepted a bare suffix")
 	}
 	partial := putFile(t, filepath.Join(dir, "ep.mkv.partial"), "half")
-	if err := discardPartial(partial); err != nil || exists(partial) {
+	if err := DiscardPartial(partial); err != nil || exists(partial) {
 		t.Fatalf("err = %v", err)
 	}
-	if err := discardPartial(partial); err != nil {
+	if err := DiscardPartial(partial); err != nil {
 		t.Fatalf("a partial that is already gone is not an error: %v", err)
 	}
 }
@@ -131,5 +131,27 @@ func TestRmdirEmptyNeverRemovesAFile(t *testing.T) {
 	}
 	if err := rmdirEmpty(empty); err != nil || exists(empty) {
 		t.Fatalf("err = %v", err)
+	}
+}
+
+func TestRemoveDirIfEmpty(t *testing.T) {
+	dir := t.TempDir()
+	empty := filepath.Join(dir, "empty")
+	if err := os.Mkdir(empty, 0o770); err != nil {
+		t.Fatal(err)
+	}
+	if removed, err := RemoveDirIfEmpty(empty); !removed || err != nil || exists(empty) {
+		t.Fatalf("removed = %v, err = %v", removed, err)
+	}
+	if removed, err := RemoveDirIfEmpty(empty); removed || err != nil {
+		t.Fatalf("a missing directory: removed = %v, err = %v", removed, err)
+	}
+	full := filepath.Join(dir, "full")
+	file := putFile(t, filepath.Join(full, "ep.mkv"), "media")
+	if removed, err := RemoveDirIfEmpty(full); removed || err != nil || !exists(file) {
+		t.Fatalf("a directory with content: removed = %v, err = %v", removed, err)
+	}
+	if removed, err := RemoveDirIfEmpty(file); removed || err == nil || !exists(file) {
+		t.Fatalf("a file: removed = %v, err = %v", removed, err)
 	}
 }

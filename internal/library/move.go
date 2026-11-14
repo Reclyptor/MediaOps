@@ -67,6 +67,9 @@ func (m Mover) Move(ctx context.Context, src, dst string) error {
 	if src == dst {
 		return fmt.Errorf("cannot move %s onto itself", src)
 	}
+	if src == dst+partialSuffix {
+		return fmt.Errorf("cannot move %s to %s: the copy would overwrite its own source", src, dst)
+	}
 	srcInfo, err := os.Lstat(src)
 	if err != nil {
 		return fmt.Errorf("cannot read the source %s: %w", src, err)
@@ -93,6 +96,35 @@ func (m Mover) Move(ctx context.Context, src, dst string) error {
 	return m.copyAcross(ctx, src, dst, srcInfo)
 }
 
+// PlacePartial puts a finished dst + ".partial" at dst. The two share a
+// directory, so the rename never crosses a filesystem and cannot fall back to
+// a copy. dst must not exist (ErrExists) and the partial must be a regular
+// file, not a link. The directory is synced afterwards. Nothing is removed:
+// on any refusal both names are left as they were.
+func PlacePartial(dst string) error {
+	dst = filepath.Clean(dst)
+	partial := dst + partialSuffix
+	info, err := os.Lstat(partial)
+	if err != nil {
+		return fmt.Errorf("cannot read the partial %s: %w", partial, err)
+	}
+	if !info.Mode().IsRegular() {
+		return fmt.Errorf("the partial %s is not a regular file", partial)
+	}
+	if _, err := os.Lstat(dst); err == nil {
+		return fmt.Errorf("%s: %w", dst, ErrExists)
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("cannot check the destination %s: %w", dst, err)
+	}
+	if err := os.Rename(partial, dst); err != nil {
+		return fmt.Errorf("renaming %s into place: %w", partial, err)
+	}
+	if err := fsutil.SyncDir(filepath.Dir(dst)); err != nil {
+		return fmt.Errorf("syncing the directory of %s: %w", dst, err)
+	}
+	return nil
+}
+
 func (m Mover) copyAcross(ctx context.Context, src, dst string, srcInfo os.FileInfo) (err error) {
 	tmp := dst + partialSuffix
 	size := srcInfo.Size()
@@ -115,7 +147,7 @@ func (m Mover) copyAcross(ctx context.Context, src, dst string, srcInfo os.FileI
 			return
 		}
 		out.Close()
-		if rmErr := discardPartial(tmp); rmErr != nil {
+		if rmErr := DiscardPartial(tmp); rmErr != nil {
 			err = errors.Join(err, fmt.Errorf("could not remove %s: %w", tmp, rmErr))
 		}
 	}()
