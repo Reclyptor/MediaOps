@@ -242,3 +242,14 @@ func TestShareRoot(t *testing.T) {
 		}
 	}
 }
+
+func TestShareContainsStaging(t *testing.T) {
+	c := Config{MediaRoot: "/mnt/media"}
+	share := c.Share()
+	if filepath.Dir(share) != c.MediaRoot || share == c.MediaRoot {
+		t.Fatalf("Share() = %q, want a directory directly under the media root", share)
+	}
+	if want := filepath.Join(share, "_pending"); c.Staging() != want {
+		t.Fatalf("Staging() = %q, want %q", c.Staging(), want)
+	}
+}

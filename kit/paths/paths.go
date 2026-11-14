@@ -38,9 +38,15 @@ func FromEnv() Config {
 	return Config{MediaRoot: root, Archive: os.Getenv("ARCHIVE_ROOT")}
 }
 
+// Share is the NAS share the anime pipeline works in: anime, ecchi, hentai and
+// the staging tree.
+func (c Config) Share() string {
+	return filepath.Join(c.MediaRoot, "dxp6800")
+}
+
 // Staging is the tree rips land in before they are promoted.
 func (c Config) Staging() string {
-	return filepath.Join(c.MediaRoot, "dxp6800", "_pending")
+	return filepath.Join(c.Share(), "_pending")
 }
 
 // RipsRoot holds one directory per rip run.
