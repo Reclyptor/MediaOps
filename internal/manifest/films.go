@@ -48,19 +48,49 @@ func (c Config) auditFilms(m *Manifest, ov *overlay) []Finding {
 	return findings
 }
 
-// seriesOf is the series folder p is, or is under Movies/ of, three levels
-// below MEDIA_ROOT.
-func seriesOf(media, p string) (string, bool) {
+// SeriesDir is the series folder MEDIA_ROOT/<share>/<category>/<series> that p
+// is or lies under. It reports false for anything shallower or outside media.
+func SeriesDir(media, p string) (string, bool) {
 	if p == "" || !strictlyWithin(media, p) {
 		return "", false
 	}
 	rel, _ := filepath.Rel(media, p)
-	parts := strings.Split(rel, string(filepath.Separator))
-	switch {
-	case len(parts) == 3:
-		return p, true
-	case len(parts) > 3 && parts[3] == "Movies":
-		return filepath.Join(media, parts[0], parts[1], parts[2]), true
+	parts := strings.SplitN(rel, string(filepath.Separator), 4)
+	if len(parts) < 3 {
+		return "", false
+	}
+	return filepath.Join(media, parts[0], parts[1], parts[2]), true
+}
+
+// FilmTitle is the "Title (YYYY)" a Movies/ file name carries, in a series
+// folder's shape or, when lone, in a non-series folder's. A ` - partN` suffix
+// is not part of it.
+func FilmTitle(name string, lone bool) (string, bool) {
+	if lone {
+		if m := loneFilm.FindStringSubmatch(name); m != nil {
+			return m[1], true
+		}
+		return "", false
+	}
+	if m := seriesFilm.FindStringSubmatch(name); m != nil {
+		return m[3], true
+	}
+	return "", false
+}
+
+// seriesOf is the series folder p is, or is under Movies/ of, three levels
+// below MEDIA_ROOT.
+func seriesOf(media, p string) (string, bool) {
+	dir, ok := SeriesDir(media, p)
+	if !ok {
+		return "", false
+	}
+	if p == dir {
+		return dir, true
+	}
+	rel, _ := filepath.Rel(dir, p)
+	if rel == "Movies" || strings.HasPrefix(rel, "Movies"+string(filepath.Separator)) {
+		return dir, true
 	}
 	return "", false
 }
