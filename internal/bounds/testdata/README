@@ -1,0 +1,22 @@
+Recorded ffprobe output for the episode-boundary detector.
+
+Each of the three Play-All files is the output of
+
+    ffprobe -v error -show_format -show_streams -show_chapters -of json FILE
+
+read over NFS for metadata only on 2026-11-14. The source paths are
+<share>/anime/..., with the path prefix rewritten to /mnt/media/library.
+
+fate-apocrypha-s01d01.json    Fate Apocrypha, Season 01 Disc 01 Play-All: 26 chapters,
+                              6 episodes, split chapters:6,10,14,18,23.
+sailor-moon-s01d01.json       Sailor Moon, Season 01 Disc 01 Play-All: 40 chapters, 8
+                              episodes at a 24 minute hint, 16 half-episodes without one.
+demon-slayer-s02d02.json      Demon Slayer, Season 02 Disc 02 Play-All: 22 chapters, 4
+                              episodes (S02E04-E07). The detector grades it auto at hint 24
+                              and cuts at chapters 7,14,20; the true cuts are 7,13,19.
+episodes-demon-slayer-s02.json
+                              Not ffprobe output. The format.duration of the library's own
+                              Demon Slayer S02E04-E07, read with ffprobe -of json on
+                              2026-11-14: the four episodes the Play-All above holds. Laid
+                              end to end they give the true boundaries (0, 1422.033,
+                              2724.129, 4146.099 s) the detector's cuts are measured against.

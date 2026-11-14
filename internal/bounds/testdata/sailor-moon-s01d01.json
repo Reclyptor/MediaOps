@@ -1,0 +1,886 @@
+{
+    "streams": [
+        {
+            "index": 0,
+            "codec_name": "h264",
+            "codec_long_name": "H.264 / AVC / MPEG-4 AVC / MPEG-4 part 10",
+            "profile": "High",
+            "codec_type": "video",
+            "codec_tag_string": "[0][0][0][0]",
+            "codec_tag": "0x0000",
+            "mime_codec_string": "avc1.640029",
+            "width": 1920,
+            "height": 1080,
+            "coded_width": 1920,
+            "coded_height": 1080,
+            "has_b_frames": 4,
+            "sample_aspect_ratio": "1:1",
+            "display_aspect_ratio": "16:9",
+            "pix_fmt": "yuv420p",
+            "level": 41,
+            "chroma_location": "left",
+            "field_order": "progressive",
+            "is_avc": "true",
+            "nal_length_size": "4",
+            "r_frame_rate": "24000/1001",
+            "avg_frame_rate": "24000/1001",
+            "time_base": "1/1000",
+            "start_pts": 0,
+            "start_time": "0.000000",
+            "bits_per_raw_sample": "8",
+            "extradata_size": 101,
+            "disposition": {
+                "default": 0,
+                "dub": 0,
+                "original": 0,
+                "comment": 0,
+                "lyrics": 0,
+                "karaoke": 0,
+                "forced": 0,
+                "hearing_impaired": 0,
+                "visual_impaired": 0,
+                "clean_effects": 0,
+                "attached_pic": 0,
+                "timed_thumbnails": 0,
+                "non_diegetic": 0,
+                "captions": 0,
+                "descriptions": 0,
+                "metadata": 0,
+                "dependent": 0,
+                "still_image": 0,
+                "multilayer": 0
+            },
+            "tags": {
+                "language": "eng",
+                "BPS-eng": "25997063",
+                "DURATION-eng": "03:12:59.568000000",
+                "NUMBER_OF_FRAMES-eng": "277632",
+                "NUMBER_OF_BYTES-eng": "37629345913",
+                "SOURCE_ID-eng": "001011",
+                "_STATISTICS_WRITING_APP-eng": "MakeMKV v1.18.1 win(x64-release)",
+                "_STATISTICS_WRITING_DATE_UTC-eng": "2025-05-08 20:43:31",
+                "_STATISTICS_TAGS-eng": "BPS DURATION NUMBER_OF_FRAMES NUMBER_OF_BYTES SOURCE_ID"
+            }
+        },
+        {
+            "index": 1,
+            "codec_name": "dts",
+            "codec_long_name": "DCA (DTS Coherent Acoustics)",
+            "profile": "DTS-HD MA",
+            "codec_type": "audio",
+            "codec_tag_string": "[0][0][0][0]",
+            "codec_tag": "0x0000",
+            "sample_fmt": "s16p",
+            "sample_rate": "48000",
+            "channels": 2,
+            "channel_layout": "stereo",
+            "bits_per_sample": 0,
+            "initial_padding": 0,
+            "r_frame_rate": "0/0",
+            "avg_frame_rate": "0/0",
+            "time_base": "1/1000",
+            "start_pts": 0,
+            "start_time": "0.000000",
+            "bits_per_raw_sample": "16",
+            "disposition": {
+                "default": 0,
+                "dub": 0,
+                "original": 0,
+                "comment": 0,
+                "lyrics": 0,
+                "karaoke": 0,
+                "forced": 0,
+                "hearing_impaired": 0,
+                "visual_impaired": 0,
+                "clean_effects": 0,
+                "attached_pic": 0,
+                "timed_thumbnails": 0,
+                "non_diegetic": 0,
+                "captions": 0,
+                "descriptions": 0,
+                "metadata": 0,
+                "dependent": 0,
+                "still_image": 0,
+                "multilayer": 0
+            },
+            "tags": {
+                "language": "eng",
+                "title": "Stereo",
+                "BPS-eng": "1713063",
+                "DURATION-eng": "03:12:59.584000000",
+                "NUMBER_OF_FRAMES-eng": "1085586",
+                "NUMBER_OF_BYTES-eng": "2479570976",
+                "SOURCE_ID-eng": "001100",
+                "_STATISTICS_WRITING_APP-eng": "MakeMKV v1.18.1 win(x64-release)",
+                "_STATISTICS_WRITING_DATE_UTC-eng": "2025-05-08 20:43:31",
+                "_STATISTICS_TAGS-eng": "BPS DURATION NUMBER_OF_FRAMES NUMBER_OF_BYTES SOURCE_ID"
+            }
+        },
+        {
+            "index": 2,
+            "codec_name": "dts",
+            "codec_long_name": "DCA (DTS Coherent Acoustics)",
+            "profile": "DTS",
+            "codec_type": "audio",
+            "codec_tag_string": "[0][0][0][0]",
+            "codec_tag": "0x0000",
+            "sample_fmt": "fltp",
+            "sample_rate": "48000",
+            "channels": 2,
+            "channel_layout": "stereo",
+            "bits_per_sample": 0,
+            "initial_padding": 0,
+            "r_frame_rate": "0/0",
+            "avg_frame_rate": "0/0",
+            "time_base": "1/1000",
+            "start_pts": 0,
+            "start_time": "0.000000",
+            "bit_rate": "1536000",
+            "disposition": {
+                "default": 0,
+                "dub": 0,
+                "original": 0,
+                "comment": 0,
+                "lyrics": 0,
+                "karaoke": 0,
+                "forced": 0,
+                "hearing_impaired": 0,
+                "visual_impaired": 0,
+                "clean_effects": 0,
+                "attached_pic": 0,
+                "timed_thumbnails": 0,
+                "non_diegetic": 0,
+                "captions": 0,
+                "descriptions": 0,
+                "metadata": 0,
+                "dependent": 0,
+                "still_image": 0,
+                "multilayer": 0
+            },
+            "tags": {
+                "language": "eng",
+                "title": "Stereo",
+                "BPS-eng": "1509000",
+                "DURATION-eng": "03:12:59.584000000",
+                "NUMBER_OF_FRAMES-eng": "1085586",
+                "NUMBER_OF_BYTES-eng": "2184199032",
+                "SOURCE_ID-eng": "001100",
+                "_STATISTICS_WRITING_APP-eng": "MakeMKV v1.18.1 win(x64-release)",
+                "_STATISTICS_WRITING_DATE_UTC-eng": "2025-05-08 20:43:31",
+                "_STATISTICS_TAGS-eng": "BPS DURATION NUMBER_OF_FRAMES NUMBER_OF_BYTES SOURCE_ID"
+            }
+        },
+        {
+            "index": 3,
+            "codec_name": "dts",
+            "codec_long_name": "DCA (DTS Coherent Acoustics)",
+            "profile": "DTS-HD MA",
+            "codec_type": "audio",
+            "codec_tag_string": "[0][0][0][0]",
+            "codec_tag": "0x0000",
+            "sample_fmt": "s16p",
+            "sample_rate": "48000",
+            "channels": 2,
+            "channel_layout": "stereo",
+            "bits_per_sample": 0,
+            "initial_padding": 0,
+            "r_frame_rate": "0/0",
+            "avg_frame_rate": "0/0",
+            "time_base": "1/1000",
+            "start_pts": 0,
+            "start_time": "0.000000",
+            "bits_per_raw_sample": "16",
+            "disposition": {
+                "default": 1,
+                "dub": 0,
+                "original": 0,
+                "comment": 0,
+                "lyrics": 0,
+                "karaoke": 0,
+                "forced": 0,
+                "hearing_impaired": 0,
+                "visual_impaired": 0,
+                "clean_effects": 0,
+                "attached_pic": 0,
+                "timed_thumbnails": 0,
+                "non_diegetic": 0,
+                "captions": 0,
+                "descriptions": 0,
+                "metadata": 0,
+                "dependent": 0,
+                "still_image": 0,
+                "multilayer": 0
+            },
+            "tags": {
+                "language": "jpn",
+                "title": "Stereo",
+                "BPS-eng": "1667538",
+                "DURATION-eng": "03:12:59.584000000",
+                "NUMBER_OF_FRAMES-eng": "1085586",
+                "NUMBER_OF_BYTES-eng": "2413675572",
+                "SOURCE_ID-eng": "001101",
+                "_STATISTICS_WRITING_APP-eng": "MakeMKV v1.18.1 win(x64-release)",
+                "_STATISTICS_WRITING_DATE_UTC-eng": "2025-05-08 20:43:31",
+                "_STATISTICS_TAGS-eng": "BPS DURATION NUMBER_OF_FRAMES NUMBER_OF_BYTES SOURCE_ID"
+            }
+        },
+        {
+            "index": 4,
+            "codec_name": "dts",
+            "codec_long_name": "DCA (DTS Coherent Acoustics)",
+            "profile": "DTS",
+            "codec_type": "audio",
+            "codec_tag_string": "[0][0][0][0]",
+            "codec_tag": "0x0000",
+            "sample_fmt": "fltp",
+            "sample_rate": "48000",
+            "channels": 2,
+            "channel_layout": "stereo",
+            "bits_per_sample": 0,
+            "initial_padding": 0,
+            "r_frame_rate": "0/0",
+            "avg_frame_rate": "0/0",
+            "time_base": "1/1000",
+            "start_pts": 0,
+            "start_time": "0.000000",
+            "bit_rate": "1536000",
+            "disposition": {
+                "default": 0,
+                "dub": 0,
+                "original": 0,
+                "comment": 0,
+                "lyrics": 0,
+                "karaoke": 0,
+                "forced": 0,
+                "hearing_impaired": 0,
+                "visual_impaired": 0,
+                "clean_effects": 0,
+                "attached_pic": 0,
+                "timed_thumbnails": 0,
+                "non_diegetic": 0,
+                "captions": 0,
+                "descriptions": 0,
+                "metadata": 0,
+                "dependent": 0,
+                "still_image": 0,
+                "multilayer": 0
+            },
+            "tags": {
+                "language": "jpn",
+                "title": "Stereo",
+                "BPS-eng": "1509000",
+                "DURATION-eng": "03:12:59.584000000",
+                "NUMBER_OF_FRAMES-eng": "1085586",
+                "NUMBER_OF_BYTES-eng": "2184199032",
+                "SOURCE_ID-eng": "001101",
+                "_STATISTICS_WRITING_APP-eng": "MakeMKV v1.18.1 win(x64-release)",
+                "_STATISTICS_WRITING_DATE_UTC-eng": "2025-05-08 20:43:31",
+                "_STATISTICS_TAGS-eng": "BPS DURATION NUMBER_OF_FRAMES NUMBER_OF_BYTES SOURCE_ID"
+            }
+        },
+        {
+            "index": 5,
+            "codec_name": "hdmv_pgs_subtitle",
+            "codec_long_name": "HDMV Presentation Graphic Stream subtitles",
+            "codec_type": "subtitle",
+            "codec_tag_string": "[0][0][0][0]",
+            "codec_tag": "0x0000",
+            "r_frame_rate": "0/0",
+            "avg_frame_rate": "0/0",
+            "time_base": "1/1000",
+            "start_pts": 0,
+            "start_time": "0.000000",
+            "duration_ts": 11579568,
+            "duration": "11579.568000",
+            "disposition": {
+                "default": 1,
+                "dub": 0,
+                "original": 0,
+                "comment": 0,
+                "lyrics": 0,
+                "karaoke": 0,
+                "forced": 0,
+                "hearing_impaired": 0,
+                "visual_impaired": 0,
+                "clean_effects": 0,
+                "attached_pic": 0,
+                "timed_thumbnails": 0,
+                "non_diegetic": 0,
+                "captions": 0,
+                "descriptions": 0,
+                "metadata": 0,
+                "dependent": 0,
+                "still_image": 0,
+                "multilayer": 0
+            },
+            "tags": {
+                "language": "eng",
+                "title": "English",
+                "BPS-eng": "30078",
+                "DURATION-eng": "03:12:27.807104166",
+                "NUMBER_OF_FRAMES-eng": "5226",
+                "NUMBER_OF_BYTES-eng": "43417800",
+                "SOURCE_ID-eng": "001200",
+                "_STATISTICS_WRITING_APP-eng": "MakeMKV v1.18.1 win(x64-release)",
+                "_STATISTICS_WRITING_DATE_UTC-eng": "2025-05-08 20:43:31",
+                "_STATISTICS_TAGS-eng": "BPS DURATION NUMBER_OF_FRAMES NUMBER_OF_BYTES SOURCE_ID"
+            }
+        },
+        {
+            "index": 6,
+            "codec_name": "hdmv_pgs_subtitle",
+            "codec_long_name": "HDMV Presentation Graphic Stream subtitles",
+            "codec_type": "subtitle",
+            "codec_tag_string": "[0][0][0][0]",
+            "codec_tag": "0x0000",
+            "r_frame_rate": "0/0",
+            "avg_frame_rate": "0/0",
+            "time_base": "1/1000",
+            "start_pts": 0,
+            "start_time": "0.000000",
+            "duration_ts": 11579568,
+            "duration": "11579.568000",
+            "disposition": {
+                "default": 0,
+                "dub": 0,
+                "original": 0,
+                "comment": 0,
+                "lyrics": 0,
+                "karaoke": 0,
+                "forced": 0,
+                "hearing_impaired": 0,
+                "visual_impaired": 0,
+                "clean_effects": 0,
+                "attached_pic": 0,
+                "timed_thumbnails": 0,
+                "non_diegetic": 0,
+                "captions": 0,
+                "descriptions": 0,
+                "metadata": 0,
+                "dependent": 0,
+                "still_image": 0,
+                "multilayer": 0
+            },
+            "tags": {
+                "language": "eng",
+                "title": "Signs & Songs",
+                "BPS-eng": "3268",
+                "DURATION-eng": "03:12:25.971937500",
+                "NUMBER_OF_FRAMES-eng": "511",
+                "NUMBER_OF_BYTES-eng": "4717063",
+                "SOURCE_ID-eng": "001201",
+                "_STATISTICS_WRITING_APP-eng": "MakeMKV v1.18.1 win(x64-release)",
+                "_STATISTICS_WRITING_DATE_UTC-eng": "2025-05-08 20:43:31",
+                "_STATISTICS_TAGS-eng": "BPS DURATION NUMBER_OF_FRAMES NUMBER_OF_BYTES SOURCE_ID"
+            }
+        },
+        {
+            "index": 7,
+            "codec_name": "hdmv_pgs_subtitle",
+            "codec_long_name": "HDMV Presentation Graphic Stream subtitles",
+            "codec_type": "subtitle",
+            "codec_tag_string": "[0][0][0][0]",
+            "codec_tag": "0x0000",
+            "r_frame_rate": "0/0",
+            "avg_frame_rate": "0/0",
+            "time_base": "1/1000",
+            "start_pts": 0,
+            "start_time": "0.000000",
+            "duration_ts": 11579568,
+            "duration": "11579.568000",
+            "disposition": {
+                "default": 0,
+                "dub": 0,
+                "original": 0,
+                "comment": 0,
+                "lyrics": 0,
+                "karaoke": 0,
+                "forced": 0,
+                "hearing_impaired": 0,
+                "visual_impaired": 0,
+                "clean_effects": 0,
+                "attached_pic": 0,
+                "timed_thumbnails": 0,
+                "non_diegetic": 0,
+                "captions": 0,
+                "descriptions": 0,
+                "metadata": 0,
+                "dependent": 0,
+                "still_image": 0,
+                "multilayer": 0
+            },
+            "tags": {
+                "language": "eng",
+                "title": "English (SDH / Dub)",
+                "BPS-eng": "38053",
+                "DURATION-eng": "03:12:45.324604166",
+                "NUMBER_OF_FRAMES-eng": "7055",
+                "NUMBER_OF_BYTES-eng": "55012354",
+                "SOURCE_ID-eng": "001202",
+                "_STATISTICS_WRITING_APP-eng": "MakeMKV v1.18.1 win(x64-release)",
+                "_STATISTICS_WRITING_DATE_UTC-eng": "2025-05-08 20:43:31",
+                "_STATISTICS_TAGS-eng": "BPS DURATION NUMBER_OF_FRAMES NUMBER_OF_BYTES SOURCE_ID"
+            }
+        }
+    ],
+    "chapters": [
+        {
+            "id": -5716985330831598969,
+            "time_base": "1/1000000000",
+            "start": 0,
+            "start_time": "0.000000",
+            "end": 93676916666,
+            "end_time": "93.676917",
+            "tags": {
+                "title": "Chapter 01"
+            }
+        },
+        {
+            "id": 6729516075018743580,
+            "time_base": "1/1000000000",
+            "start": 93676916666,
+            "start_time": "93.676917",
+            "end": 694193500000,
+            "end_time": "694.193500",
+            "tags": {
+                "title": "Chapter 02"
+            }
+        },
+        {
+            "id": 8251913084486626713,
+            "time_base": "1/1000000000",
+            "start": 694193500000,
+            "start_time": "694.193500",
+            "end": 1325824500000,
+            "end_time": "1325.824500",
+            "tags": {
+                "title": "Chapter 03"
+            }
+        },
+        {
+            "id": -6463988755085677154,
+            "time_base": "1/1000000000",
+            "start": 1325824500000,
+            "start_time": "1325.824500",
+            "end": 1416915500000,
+            "end_time": "1416.915500",
+            "tags": {
+                "title": "Chapter 04"
+            }
+        },
+        {
+            "id": 6259555412119711484,
+            "time_base": "1/1000000000",
+            "start": 1416915500000,
+            "start_time": "1416.915500",
+            "end": 1447446000000,
+            "end_time": "1447.446000",
+            "tags": {
+                "title": "Chapter 05"
+            }
+        },
+        {
+            "id": 5459555221017114978,
+            "time_base": "1/1000000000",
+            "start": 1447446000000,
+            "start_time": "1447.446000",
+            "end": 1560058500000,
+            "end_time": "1560.058500",
+            "tags": {
+                "title": "Chapter 06"
+            }
+        },
+        {
+            "id": 6107648734791969750,
+            "time_base": "1/1000000000",
+            "start": 1560058500000,
+            "start_time": "1560.058500",
+            "end": 2168666500000,
+            "end_time": "2168.666500",
+            "tags": {
+                "title": "Chapter 07"
+            }
+        },
+        {
+            "id": 6373537817947580467,
+            "time_base": "1/1000000000",
+            "start": 2168666500000,
+            "start_time": "2168.666500",
+            "end": 2773270500000,
+            "end_time": "2773.270500",
+            "tags": {
+                "title": "Chapter 08"
+            }
+        },
+        {
+            "id": 4232680570596597581,
+            "time_base": "1/1000000000",
+            "start": 2773270500000,
+            "start_time": "2773.270500",
+            "end": 2864361500000,
+            "end_time": "2864.361500",
+            "tags": {
+                "title": "Chapter 09"
+            }
+        },
+        {
+            "id": -7721409388164376554,
+            "time_base": "1/1000000000",
+            "start": 2864361500000,
+            "start_time": "2864.361500",
+            "end": 2894892000000,
+            "end_time": "2894.892000",
+            "tags": {
+                "title": "Chapter 10"
+            }
+        },
+        {
+            "id": -8722870545756977341,
+            "time_base": "1/1000000000",
+            "start": 2894892000000,
+            "start_time": "2894.892000",
+            "end": 3007504500000,
+            "end_time": "3007.504500",
+            "tags": {
+                "title": "Chapter 11"
+            }
+        },
+        {
+            "id": -4954558626764036790,
+            "time_base": "1/1000000000",
+            "start": 3007504500000,
+            "start_time": "3007.504500",
+            "end": 3618114500000,
+            "end_time": "3618.114500",
+            "tags": {
+                "title": "Chapter 12"
+            }
+        },
+        {
+            "id": -6623545448372646989,
+            "time_base": "1/1000000000",
+            "start": 3618114500000,
+            "start_time": "3618.114500",
+            "end": 4220716500000,
+            "end_time": "4220.716500",
+            "tags": {
+                "title": "Chapter 13"
+            }
+        },
+        {
+            "id": 8929527866051748731,
+            "time_base": "1/1000000000",
+            "start": 4220716500000,
+            "start_time": "4220.716500",
+            "end": 4311807500000,
+            "end_time": "4311.807500",
+            "tags": {
+                "title": "Chapter 14"
+            }
+        },
+        {
+            "id": -1138340506818261454,
+            "time_base": "1/1000000000",
+            "start": 4311807500000,
+            "start_time": "4311.807500",
+            "end": 4342338000000,
+            "end_time": "4342.338000",
+            "tags": {
+                "title": "Chapter 15"
+            }
+        },
+        {
+            "id": 6281680601489798093,
+            "time_base": "1/1000000000",
+            "start": 4342338000000,
+            "start_time": "4342.338000",
+            "end": 4454950500000,
+            "end_time": "4454.950500",
+            "tags": {
+                "title": "Chapter 16"
+            }
+        },
+        {
+            "id": -5840120401188735635,
+            "time_base": "1/1000000000",
+            "start": 4454950500000,
+            "start_time": "4454.950500",
+            "end": 5031526500000,
+            "end_time": "5031.526500",
+            "tags": {
+                "title": "Chapter 17"
+            }
+        },
+        {
+            "id": -9166316641892528664,
+            "time_base": "1/1000000000",
+            "start": 5031526500000,
+            "start_time": "5031.526500",
+            "end": 5668162500000,
+            "end_time": "5668.162500",
+            "tags": {
+                "title": "Chapter 18"
+            }
+        },
+        {
+            "id": -892044069514486148,
+            "time_base": "1/1000000000",
+            "start": 5668162500000,
+            "start_time": "5668.162500",
+            "end": 5759253500000,
+            "end_time": "5759.253500",
+            "tags": {
+                "title": "Chapter 19"
+            }
+        },
+        {
+            "id": 2918193580745492513,
+            "time_base": "1/1000000000",
+            "start": 5759253500000,
+            "start_time": "5759.253500",
+            "end": 5789784000000,
+            "end_time": "5789.784000",
+            "tags": {
+                "title": "Chapter 20"
+            }
+        },
+        {
+            "id": 1044361473119220889,
+            "time_base": "1/1000000000",
+            "start": 5789784000000,
+            "start_time": "5789.784000",
+            "end": 5902396500000,
+            "end_time": "5902.396500",
+            "tags": {
+                "title": "Chapter 21"
+            }
+        },
+        {
+            "id": -3509355642268378960,
+            "time_base": "1/1000000000",
+            "start": 5902396500000,
+            "start_time": "5902.396500",
+            "end": 6505999500000,
+            "end_time": "6505.999500",
+            "tags": {
+                "title": "Chapter 22"
+            }
+        },
+        {
+            "id": -1329143715409070285,
+            "time_base": "1/1000000000",
+            "start": 6505999500000,
+            "start_time": "6505.999500",
+            "end": 7115608500000,
+            "end_time": "7115.608500",
+            "tags": {
+                "title": "Chapter 23"
+            }
+        },
+        {
+            "id": -3089833667561481715,
+            "time_base": "1/1000000000",
+            "start": 7115608500000,
+            "start_time": "7115.608500",
+            "end": 7206699500000,
+            "end_time": "7206.699500",
+            "tags": {
+                "title": "Chapter 24"
+            }
+        },
+        {
+            "id": 8881475655479922247,
+            "time_base": "1/1000000000",
+            "start": 7206699500000,
+            "start_time": "7206.699500",
+            "end": 7237230000000,
+            "end_time": "7237.230000",
+            "tags": {
+                "title": "Chapter 25"
+            }
+        },
+        {
+            "id": -8962112855299387092,
+            "time_base": "1/1000000000",
+            "start": 7237230000000,
+            "start_time": "7237.230000",
+            "end": 7349842500000,
+            "end_time": "7349.842500",
+            "tags": {
+                "title": "Chapter 26"
+            }
+        },
+        {
+            "id": -1569104085522565238,
+            "time_base": "1/1000000000",
+            "start": 7349842500000,
+            "start_time": "7349.842500",
+            "end": 7919411500000,
+            "end_time": "7919.411500",
+            "tags": {
+                "title": "Chapter 27"
+            }
+        },
+        {
+            "id": 6562424839234963978,
+            "time_base": "1/1000000000",
+            "start": 7919411500000,
+            "start_time": "7919.411500",
+            "end": 8563054500000,
+            "end_time": "8563.054500",
+            "tags": {
+                "title": "Chapter 28"
+            }
+        },
+        {
+            "id": 5674105228000861934,
+            "time_base": "1/1000000000",
+            "start": 8563054500000,
+            "start_time": "8563.054500",
+            "end": 8654604291666,
+            "end_time": "8654.604292",
+            "tags": {
+                "title": "Chapter 29"
+            }
+        },
+        {
+            "id": 3250621156162991283,
+            "time_base": "1/1000000000",
+            "start": 8654604291666,
+            "start_time": "8654.604292",
+            "end": 8684676000000,
+            "end_time": "8684.676000",
+            "tags": {
+                "title": "Chapter 30"
+            }
+        },
+        {
+            "id": -2740996883423883428,
+            "time_base": "1/1000000000",
+            "start": 8684676000000,
+            "start_time": "8684.676000",
+            "end": 8797288500000,
+            "end_time": "8797.288500",
+            "tags": {
+                "title": "Chapter 31"
+            }
+        },
+        {
+            "id": -1839929593585401175,
+            "time_base": "1/1000000000",
+            "start": 8797288500000,
+            "start_time": "8797.288500",
+            "end": 9445936500000,
+            "end_time": "9445.936500",
+            "tags": {
+                "title": "Chapter 32"
+            }
+        },
+        {
+            "id": -6313827079028223183,
+            "time_base": "1/1000000000",
+            "start": 9445936500000,
+            "start_time": "9445.936500",
+            "end": 10010500500000,
+            "end_time": "10010.500500",
+            "tags": {
+                "title": "Chapter 33"
+            }
+        },
+        {
+            "id": -5291799996041137041,
+            "time_base": "1/1000000000",
+            "start": 10010500500000,
+            "start_time": "10010.500500",
+            "end": 10101591500000,
+            "end_time": "10101.591500",
+            "tags": {
+                "title": "Chapter 34"
+            }
+        },
+        {
+            "id": -3003962950410533355,
+            "time_base": "1/1000000000",
+            "start": 10101591500000,
+            "start_time": "10101.591500",
+            "end": 10132122000000,
+            "end_time": "10132.122000",
+            "tags": {
+                "title": "Chapter 35"
+            }
+        },
+        {
+            "id": 416772211979711890,
+            "time_base": "1/1000000000",
+            "start": 10132122000000,
+            "start_time": "10132.122000",
+            "end": 10244734500000,
+            "end_time": "10244.734500",
+            "tags": {
+                "title": "Chapter 36"
+            }
+        },
+        {
+            "id": -707041621075470059,
+            "time_base": "1/1000000000",
+            "start": 10244734500000,
+            "start_time": "10244.734500",
+            "end": 10856345500000,
+            "end_time": "10856.345500",
+            "tags": {
+                "title": "Chapter 37"
+            }
+        },
+        {
+            "id": 5158844832652999793,
+            "time_base": "1/1000000000",
+            "start": 10856345500000,
+            "start_time": "10856.345500",
+            "end": 11457946500000,
+            "end_time": "11457.946500",
+            "tags": {
+                "title": "Chapter 38"
+            }
+        },
+        {
+            "id": -2830887066308429714,
+            "time_base": "1/1000000000",
+            "start": 11457946500000,
+            "start_time": "11457.946500",
+            "end": 11549037500000,
+            "end_time": "11549.037500",
+            "tags": {
+                "title": "Chapter 39"
+            }
+        },
+        {
+            "id": 6833320524604115969,
+            "time_base": "1/1000000000",
+            "start": 11549037500000,
+            "start_time": "11549.037500",
+            "end": 11579568000000,
+            "end_time": "11579.568000",
+            "tags": {
+                "title": "Chapter 40"
+            }
+        }
+    ],
+    "format": {
+        "filename": "/mnt/media/library/anime/Sailor Moon/Extras/Season 01/Disc 01/Sailor Moon_t00.mkv",
+        "nb_streams": 8,
+        "nb_programs": 0,
+        "nb_stream_groups": 0,
+        "format_name": "matroska,webm",
+        "format_long_name": "Matroska / WebM",
+        "start_time": "0.000000",
+        "duration": "11579.568000",
+        "size": "47003707450",
+        "bit_rate": "32473548",
+        "probe_score": 100,
+        "tags": {
+            "title": "Sailor Moon",
+            "encoder": "libmakemkv v1.18.1 (1.3.10/1.5.2) win(x64-release)",
+            "creation_time": "2025-05-08T20:43:31.000000Z"
+        }
+    }
+}
