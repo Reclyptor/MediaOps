@@ -12,9 +12,11 @@ and — importantly — [what it does *not* solve](SPEC.md#6-what-this-does-not-
 ## Deployment
 
 Deployed by Flux from [`Reclyptor/Kubernetes`](https://github.com/Reclyptor/Kubernetes)
-as `apps/mediaops`. It is a single long-lived pod pinned to **`styxeon`**, the
-worker with the wired 10G path to the NAS, with `/mnt/primary/videos` mounted
-read-write at `/mnt/media`.
+as `apps/mediaops`. It is two long-lived pods from this one image: `deploy/mediaops`,
+the library workbench (any node, `/mnt/primary/videos` mounted read-write at
+`/mnt/media`), and `deploy/mediaops-rip`, the ripper (**`styxeon`**, the worker with
+the wired 10G path to the NAS and the optical drives, with only the staging tree
+mounted). The disc tools run only in the ripper.
 
 ```bash
 kubectl -n mediaops exec -it deploy/mediaops -- bash
@@ -121,7 +123,18 @@ Extras folder.
 `/opt/makemkv`, since the image itself is musl), and `mkv-drives` / `mkv-rip` drive
 the eight BP60NB10 drives on `styxeon`.
 
-**The pod must be privileged** to see `/dev/sr*` and `/dev/sg*`, with `cdrom` (24) in
+**Run them in the ripper pod only:**
+
+```bash
+kubectl -n mediaops exec deploy/mediaops-rip -- mkv-rip list
+```
+
+Both tools refuse to run, exit 3, unless `MEDIAOPS_ROLE=rip`, which only the ripper's
+Deployment sets (`--version` works anywhere). The reason is the lease below: it lives in
+one pod's `/tmp`, so `mkv-rip list`, `status` or `wait` run in the library pod would
+read a live rip as dead and write that verdict to the NAS.
+
+**The ripper pod must be privileged** to see `/dev/sr*` and `/dev/sg*`, with `cdrom` (24) in
 `supplementalGroups`. It still runs as uid 3000. Unprivileged, `mkv-drives` can still
 read serials and link speeds from sysfs, but it cannot read tray or media state and
 `mkv-rip` will block every disc.
@@ -144,7 +157,7 @@ mkv-rip stop <run-id>            # stop the run holding the drives
 ```
 
 One controller at a time: whoever may spin a drive (a rip, a `finalize`, an `identify`)
-holds a lock in the pod, and a second one is refused with exit 3, naming the holder.
+holds a lock in the ripper pod, and a second one is refused with exit 3, naming the holder.
 Every command prints one JSON value; errors are one `mkv-rip: FATAL:` line.
 
 Rips land in `$MEDIA_ROOT/dxp6800/_pending/` as `<dest>.partial/` and are renamed into
@@ -180,7 +193,7 @@ The tests replay `makemkvcon` output recorded from real discs
 (`internal/makemkv/testdata/`) and re-execute the test binary as the fake `makemkvcon`.
 CI runs `gofmt`, `go vet`, a pinned `staticcheck` and the tests before it builds an image,
 and a failing test blocks the push. Any merge to `master` rolls the pod, which kills a
-running rip: land only when `mkv-rip list` shows nothing running.
+running rip: land only when `mkv-rip list` (in `deploy/mediaops-rip`) shows nothing running.
 
 ## One-off programs
 

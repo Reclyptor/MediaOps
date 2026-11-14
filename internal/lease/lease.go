@@ -17,7 +17,9 @@ import (
 )
 
 // DefaultPath lives in the pod's /tmp on purpose: every process that can touch
-// the drives shares the pod, and a pod roll leaves an empty /tmp.
+// the drives shares the ripper pod, and a pod roll leaves an empty /tmp. The
+// lease is per pod by design, so a second pod holding it would be blind to the
+// first's runs; the disc tools refuse to run outside the ripper (cli.RequireRipRole).
 const DefaultPath = "/tmp/mkv-rip.lease"
 
 const retryEvery = 100 * time.Millisecond

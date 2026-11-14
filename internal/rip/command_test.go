@@ -31,6 +31,7 @@ func (g *rig) forCommands() *rig {
 	g.deps.Exe = "/nonexistent/mkv-rip"
 	g.t.Setenv("HOME", g.t.TempDir())
 	g.t.Setenv("MAKEMKV_KEY", "test-key")
+	g.t.Setenv(cli.RoleEnv, cli.RoleRip)
 	return g
 }
 
@@ -158,6 +159,81 @@ func TestExitCodes(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestRoleGuard(t *testing.T) {
+	commands := [][]string{
+		nil,
+		{"bogus"},
+		{"start", "-"},
+		{"identify"},
+		{"status"},
+		{"wait", "20261113-100000-0001"},
+		{"list"},
+		{"finalize", "20261113-100000-0001"},
+		{"stop", "20261113-100000-0001"},
+		{controllerArg},
+	}
+	for _, role := range []struct {
+		name  string
+		set   bool
+		value string
+	}{{"unset", false, ""}, {"empty", true, ""}, {"library", true, "library"}, {"rip with a suffix", true, "ripper"}} {
+		t.Run(role.name, func(t *testing.T) {
+			g := newCmdRig(t, "SERIAL00")
+			// A running run whose lease is not held is what a pod without the
+			// lease would mark dead on any read.
+			id := "20261113-100000-0001"
+			g.putRun(id, runstore.RunRunning, 0)
+			stateFile := filepath.Join(g.paths.RipsRoot(), id, "state.json")
+			before, err := os.ReadFile(stateFile)
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Setenv(cli.RoleEnv, role.value) // registers the restore
+			if !role.set {
+				os.Unsetenv(cli.RoleEnv)
+			}
+
+			for _, args := range commands {
+				stdout, stderr, code := g.mkvRip(`{"discs":[]}`, args...)
+				if code != cli.ExitRefused || stdout != "" {
+					t.Errorf("mkv-rip %v: exit %d, stdout %q, stderr %q; want exit 3 and no output", args, code, stdout, stderr)
+				}
+				if want := "mkv-rip: FATAL: "; !strings.HasPrefix(stderr, want) || strings.Count(stderr, "\n") != 1 ||
+					!strings.Contains(stderr, "kubectl -n mediaops exec deploy/mediaops-rip -- mkv-rip") {
+					t.Errorf("mkv-rip %v: stderr = %q, want one FATAL line naming the ripper", args, stderr)
+				}
+			}
+
+			after, err := os.ReadFile(stateFile)
+			if err != nil || string(after) != string(before) {
+				t.Errorf("the run's record changed (%v):\n%s\n%s", err, before, after)
+			}
+			if fileExists(g.deps.LeasePath) {
+				t.Error("the lease file was created")
+			}
+			if len(g.runner.calls) != 0 {
+				t.Errorf("programs ran: %v", g.runner.calls)
+			}
+		})
+	}
+
+	t.Run("version needs no role", func(t *testing.T) {
+		g := newCmdRig(t)
+		t.Setenv(cli.RoleEnv, "")
+		stdout, _, code := g.mkvRip("", "--version")
+		if code != cli.ExitOK || !strings.HasPrefix(stdout, "mkv-rip ") {
+			t.Errorf("--version: exit %d, stdout %q", code, stdout)
+		}
+	})
+
+	t.Run("rip is let through", func(t *testing.T) {
+		g := newCmdRig(t)
+		if _, stderr, code := g.mkvRip("", "list"); code != cli.ExitOK {
+			t.Errorf("list as the ripper: exit %d, stderr %q", code, stderr)
+		}
+	})
 }
 
 func TestWaitPrintsFinalState(t *testing.T) {

@@ -28,6 +28,9 @@ type runRef struct {
 
 // Command is the mkv-rip body: args are what follows the program name.
 func Command(ctx context.Context, d Deps, args []string, streams cli.IO) error {
+	if err := cli.RequireRipRole("mkv-rip"); err != nil {
+		return err
+	}
 	if len(args) == 0 {
 		return cli.Usage(errors.New(usage))
 	}

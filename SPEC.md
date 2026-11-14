@@ -160,8 +160,9 @@ Mirrors `apps/makotogotchi` and `apps/seraex`.
 
 ### 4.1 Scheduling and resources
 
-Pinned to `styxeon` by `nodeAffinity` — **it is the wired-10G node, and that is
-the entire point of the app.** styxeon currently sits at 20% CPU / 22% memory
+Prefers `styxeon` by `nodeAffinity` — **it is the wired-10G node, and that is
+the point of the app.** The ripper pod (`deploy/mediaops-rip`, §10) is the one that
+must run there, for the drives. styxeon currently sits at 20% CPU / 22% memory
 allocated of 16 cores / 28 GiB, so there is ample room.
 
 ```
@@ -514,8 +515,8 @@ rpath point at `/opt/makemkv/lib`. The Alpine stage copies that tree in whole.
 
 ### Privilege
 
-The pod must be **privileged** to see `/dev/sr*` and `/dev/sg*`, and pinned to
-`styxeon`. It still runs as uid 3000; privilege exposes the device nodes and
+The ripper pod (`deploy/mediaops-rip`) must be **privileged** to see `/dev/sr*` and
+`/dev/sg*`, and pinned to `styxeon`. It still runs as uid 3000; privilege exposes the device nodes and
 grants a non-root process no capabilities, so root-owned media stays
 unrepresentable (M5). `supplementalGroups` must include 24 (`cdrom`), which owns
 the drive nodes. Group 6 (`disk`) must not be added.
@@ -565,14 +566,26 @@ Every command prints exactly one JSON value on stdout and errors as one line,
 `mkv-rip: FATAL: <sentence>`, on stderr. Exit codes: 0 success (for `wait`, the run ended
 `complete`); 1 the run ended `incomplete`, or `finalize` has nothing to do; 2 usage error,
 invalid input or unknown run id; 3 refused by a guard (the drives are leased, and the
-message names the holder; staging is not the NAS; `MAKEMKV_KEY` is missing); 4 internal
-error. `--selftest` is gone: the tests are `go test`.
+message names the holder; staging is not the NAS; `MAKEMKV_KEY` is missing; the role
+guard below); 4 internal error. `--selftest` is gone: the tests are `go test`.
+
+**Where the disc tools run.** Library work and ripping are separate Deployments of this
+image: `deploy/mediaops` (library) and `deploy/mediaops-rip` (ripper). `mkv-rip` (every
+subcommand, including the internal controller) and `mkv-drives` refuse, exit 3 and one
+`FATAL` line naming `kubectl -n mediaops exec deploy/mediaops-rip -- <tool> ARGS`, unless
+`MEDIAOPS_ROLE` is exactly `rip`; only the ripper's Deployment sets it. The check is
+`cli.RequireRipRole`, called first in each command, before any run-store, lease or
+device access. `--version` is answered before the command runs and works anywhere; the
+tools have no other help output. The guard exists because the lease below is per pod
+(see next paragraph): in any other pod `Store.Load` would see no held lease and persist
+"controller died" for a live run.
 
 **One controller at a time.** Whoever may spin a drive (a rip, a `finalize`, an
 `identify`) holds an exclusive `flock` on `/tmp/mkv-rip.lease` for its whole life and
 writes `{kind, run_id, pid, started_at}` into it, so a refusal can name it. Liveness is
 the held lock, never a pid: the kernel releases the lock the instant its holder dies,
-and a pod roll leaves an empty `/tmp`. A `running` or `finalizing` run whose lease is not
+and a pod roll leaves an empty `/tmp`. The lease is per ripper pod by design; it cannot
+see a controller in another pod, which is why the role guard exists. A `running` or `finalizing` run whose lease is not
 held and naming it is dead: it is reported `incomplete` / "controller died", its
 unfinished discs `failed`, and that verdict is written to `state.json`.
 

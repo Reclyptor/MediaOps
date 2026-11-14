@@ -311,6 +311,9 @@ func clip(s string) string {
 
 // Command is the body of mkv-drives: it prints every drive as one JSON array.
 func Command(ctx context.Context, h *Host, args []string, streams cli.IO) error {
+	if err := cli.RequireRipRole("mkv-drives"); err != nil {
+		return err
+	}
 	if len(args) > 0 {
 		return cli.Usage(errors.New("usage: mkv-drives [--version]"))
 	}

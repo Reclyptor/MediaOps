@@ -394,7 +394,40 @@ func TestEjectVerifiesTray(t *testing.T) {
 	})
 }
 
+// asRipper makes the test run in the ripper pod, where the disc tools may run.
+func asRipper(t *testing.T) { t.Setenv(cli.RoleEnv, cli.RoleRip) }
+
+func TestCommandRoleGuard(t *testing.T) {
+	for _, role := range []struct {
+		name  string
+		set   bool
+		value string
+	}{{"unset", false, ""}, {"empty", true, ""}, {"library", true, "library"}, {"rip with a suffix", true, "ripper"}} {
+		t.Run(role.name, func(t *testing.T) {
+			t.Setenv(cli.RoleEnv, role.value) // registers the restore
+			if !role.set {
+				os.Unsetenv(cli.RoleEnv)
+			}
+			s := newSysTree(t)
+			s.addDrive("sr0", "5-1.2.4", "SERIAL0", "480", "sg0")
+			dev := &fakeDevice{}
+			runner := &fakeRunner{}
+			var out, errOut bytes.Buffer
+			for _, args := range [][]string{nil, {"--labels"}} {
+				err := Command(t.Context(), newTestHost(dev, runner, s.sysBlock), args, cli.IO{Stdout: &out, Stderr: &errOut})
+				if cli.Code(err) != cli.ExitRefused || !strings.Contains(err.Error(), "kubectl -n mediaops exec deploy/mediaops-rip -- mkv-drives") {
+					t.Errorf("Command(%v) = %v (exit %d), want a refusal naming the ripper", args, err, cli.Code(err))
+				}
+			}
+			if out.Len() != 0 || errOut.Len() != 0 || dev.reads != 0 || len(runner.calls) != 0 {
+				t.Errorf("a refusal touched the drives: stdout %q, stderr %q, %d status reads, calls %v", out.String(), errOut.String(), dev.reads, runner.calls)
+			}
+		})
+	}
+}
+
 func TestCommand(t *testing.T) {
+	asRipper(t)
 	t.Run("JSON array with error always present", func(t *testing.T) {
 		s := newSysTree(t)
 		s.addDrive("sr0", "5-1.2.4", "SERIAL0", "480", "sg0")

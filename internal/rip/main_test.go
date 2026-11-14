@@ -327,7 +327,7 @@ func (p *procRig) command(env []string, stdin string, args ...string) *exec.Cmd 
 	}
 	cmd := exec.Command(exe, args...)
 	cmd.Env = append(os.Environ(),
-		roleEnv+"="+roleCLI, noExitSleep, dirEnv+"="+p.dir, "HOME="+filepath.Join(p.dir, "home"), "MAKEMKV_KEY=testkey-secret")
+		roleEnv+"="+roleCLI, cli.RoleEnv+"="+cli.RoleRip, noExitSleep, dirEnv+"="+p.dir, "HOME="+filepath.Join(p.dir, "home"), "MAKEMKV_KEY=testkey-secret")
 	cmd.Env = append(cmd.Env, env...)
 	if stdin != "" {
 		cmd.Stdin = strings.NewReader(stdin)
