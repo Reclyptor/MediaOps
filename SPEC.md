@@ -986,6 +986,8 @@ truncated. The journal, like the lock file, must be a regular file; it is opened
 sha256(absolute manifest path)>.lock`, pod-local like the drive lease, so two execs of one
 manifest cannot interleave; the second gets exit 3. The lock is taken before the journal
 is read and `check` runs, and the lock file is never removed.
+Because the lock is per pod, `mkv-manifest` is run in the library pod
+(`deploy/mediaops`) only; the ripper mounts only the staging tree.
 
 On a rerun, ops with `done` are skipped. An op with `begin` and no `done` is in doubt and is
 assessed from the tree before anything runs. `check` does the same, so the gate and the
