@@ -63,6 +63,28 @@ type Stream struct {
 	Width, Height int
 	Default       bool
 	Tags          map[string]string
+	// TimeBase is the stream's time base as ffprobe prints it, such as "1/1000".
+	TimeBase string
+	// NALLengthSize is ffprobe's nal_length_size for AVCC and HVCC h264 and
+	// hevc, and 0 for every other stream.
+	NALLengthSize int
+	// SampleRate is the audio sample rate in Hz, 0 when ffprobe prints none.
+	SampleRate int
+}
+
+// rawStream is one entry of ffprobe's streams array.
+type rawStream struct {
+	Index         *int              `json:"index"`
+	CodecType     *string           `json:"codec_type"`
+	CodecName     string            `json:"codec_name"`
+	Channels      int               `json:"channels"`
+	Width         int               `json:"width"`
+	Height        int               `json:"height"`
+	TimeBase      string            `json:"time_base"`
+	NALLengthSize string            `json:"nal_length_size"`
+	SampleRate    string            `json:"sample_rate"`
+	Disposition   map[string]int    `json:"disposition"`
+	Tags          map[string]string `json:"tags"`
 }
 
 // Streams lists the streams of path. A stream without an index or codec_type
@@ -79,16 +101,7 @@ func Streams(ctx context.Context, r proc.Runner, path string) ([]Stream, error) 
 	}
 
 	var out struct {
-		Streams *[]struct {
-			Index       *int              `json:"index"`
-			CodecType   *string           `json:"codec_type"`
-			CodecName   string            `json:"codec_name"`
-			Channels    int               `json:"channels"`
-			Width       int               `json:"width"`
-			Height      int               `json:"height"`
-			Disposition map[string]int    `json:"disposition"`
-			Tags        map[string]string `json:"tags"`
-		} `json:"streams"`
+		Streams *[]rawStream `json:"streams"`
 	}
 	if err := json.Unmarshal(res.Stdout, &out); err != nil {
 		return nil, fmt.Errorf("ffprobe printed unreadable JSON for %s: %w", path, err)
@@ -96,9 +109,12 @@ func Streams(ctx context.Context, r proc.Runner, path string) ([]Stream, error) 
 	if out.Streams == nil {
 		return nil, fmt.Errorf("ffprobe lists no streams array for %s", path)
 	}
+	return convertStreams(*out.Streams, path)
+}
 
-	streams := make([]Stream, 0, len(*out.Streams))
-	for i, raw := range *out.Streams {
+func convertStreams(raws []rawStream, path string) ([]Stream, error) {
+	streams := make([]Stream, 0, len(raws))
+	for i, raw := range raws {
 		if raw.Index == nil || raw.CodecType == nil {
 			return nil, fmt.Errorf("stream %d of %s has no index or codec_type", i, path)
 		}
@@ -110,10 +126,27 @@ func Streams(ctx context.Context, r proc.Runner, path string) ([]Stream, error) 
 			}
 			tags[lk] = v
 		}
+		nal := 0
+		if raw.NALLengthSize != "" {
+			n, err := strconv.Atoi(raw.NALLengthSize)
+			if err != nil || n < 1 || n > 4 {
+				return nil, fmt.Errorf("stream %d of %s reports a nal_length_size of %q, which is not 1 to 4", *raw.Index, path, raw.NALLengthSize)
+			}
+			nal = n
+		}
+		rate := 0
+		if raw.SampleRate != "" {
+			n, err := strconv.Atoi(raw.SampleRate)
+			if err != nil || n < 1 {
+				return nil, fmt.Errorf("stream %d of %s reports a sample_rate of %q, which is not a positive integer", *raw.Index, path, raw.SampleRate)
+			}
+			rate = n
+		}
 		streams = append(streams, Stream{
 			Index: *raw.Index, CodecType: *raw.CodecType, CodecName: raw.CodecName,
 			Channels: raw.Channels, Width: raw.Width, Height: raw.Height,
 			Default: raw.Disposition["default"] == 1, Tags: tags,
+			TimeBase: raw.TimeBase, NALLengthSize: nal, SampleRate: rate,
 		})
 	}
 	return streams, nil

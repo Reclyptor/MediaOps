@@ -1,0 +1,52 @@
+{
+    "packets": [
+        {
+            "stream_index": 0,
+            "pts": 0,
+            "pts_time": "0.000000",
+            "dts": 0,
+            "size": "4327",
+            "flags": "K__"
+        },
+        {
+            "stream_index": 0,
+            "pts": 83,
+            "pts_time": "0.083000",
+            "dts": 83,
+            "size": "1532",
+            "flags": "___"
+        },
+        {
+            "stream_index": 0,
+            "pts": 167,
+            "pts_time": "0.167000",
+            "dts": 167,
+            "size": "1850",
+            "flags": "___"
+        },
+        {
+            "stream_index": 0,
+            "pts": 250,
+            "pts_time": "0.250000",
+            "dts": 250,
+            "size": "1876",
+            "flags": "___"
+        },
+        {
+            "stream_index": 0,
+            "pts": 333,
+            "pts_time": "0.333000",
+            "dts": 333,
+            "size": "1892",
+            "flags": "___"
+        },
+        {
+            "stream_index": 0,
+            "pts": 417,
+            "pts_time": "0.417000",
+            "dts": 417,
+            "size": "1996",
+            "flags": "___"
+        }
+    ]
+}
