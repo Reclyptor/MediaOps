@@ -9,14 +9,16 @@ import (
 	"strings"
 )
 
-// videoExts is every container the library holds, kept in step with the
-// enumeration in anime-normalize's probe-tracks.sh. An extension missing here is
-// invisible to the promotion's completeness check, which is the one failure
-// that check exists to prevent: .hack//SIGN is 27 .ogm files, and the library
-// also carries .vob and .m4v, none of which an mkv-only list would account for.
+// videoExts is every container the library holds: the enumeration in
+// anime-normalize's probe-tracks.sh, plus .ogv and .asf, which the audits
+// listed and the movers did not. An extension missing here is invisible to the
+// promotion's completeness check, which is the one failure that check exists
+// to prevent: .hack//SIGN is 27 .ogm files, and the library also carries .vob
+// and .m4v, none of which an mkv-only list would account for.
 var videoExts = []string{
 	".mkv", ".ogm", ".avi", ".mp4", ".m2ts", ".ts", ".m4v", ".wmv",
 	".rmvb", ".mov", ".flv", ".webm", ".divx", ".mpg", ".mpeg", ".vob",
+	".ogv", ".asf",
 }
 
 // IsVideo reports whether name has a video extension, ignoring case.

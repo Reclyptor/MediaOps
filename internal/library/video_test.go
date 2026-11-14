@@ -14,18 +14,23 @@ var probeTracksExts = []string{
 	"rmvb", "mov", "flv", "webm", "divx", "mpg", "mpeg", "vob",
 }
 
+// auditOnlyExts are the containers the audits always listed and the movers did
+// not, until they joined the set.
+var auditOnlyExts = []string{"ogv", "asf"}
+
 func TestVideoExtsMatchProbeTracks(t *testing.T) {
 	var got []string
 	for _, e := range videoExts {
 		got = append(got, strings.TrimPrefix(e, "."))
 	}
-	if !slices.Equal(got, probeTracksExts) {
-		t.Fatalf("videoExts = %v, probe-tracks.sh has %v", got, probeTracksExts)
+	want := slices.Concat(probeTracksExts, auditOnlyExts)
+	if !slices.Equal(got, want) {
+		t.Fatalf("videoExts = %v, want probe-tracks.sh's list plus %v = %v", got, auditOnlyExts, want)
 	}
 }
 
 func TestIsVideo(t *testing.T) {
-	for _, ext := range probeTracksExts {
+	for _, ext := range slices.Concat(probeTracksExts, auditOnlyExts) {
 		for _, name := range []string{"ep." + ext, "EP." + strings.ToUpper(ext), "a.b." + ext} {
 			if !IsVideo(name) {
 				t.Errorf("IsVideo(%q) = false", name)
