@@ -85,7 +85,7 @@ is a stream-copy/probe utility with no heavy runtime.
 | `mkvtoolnix` | `mkvmerge` (chapter splitting — keyframe-exact, stream copy), `mkvpropedit` (container titles), `mkvinfo`, `mkvextract` |
 | `ffmpeg` | `ffprobe` for duration/stream/chapter probing; `ffmpeg` for frame extraction |
 | `imagemagick` + `font-dejavu` | `montage` for timestamped contact sheets. The font is not optional — `-annotate` silently produces unlabelled tiles without it, and an unlabelled contact sheet cannot be used to verify a cut point |
-| `python3`, `ca-certificates` | the remaining Python tools (detection, frame evidence); AniList GraphQL over TLS (stdlib `urllib` is sufficient — no `requests`) |
+| `python3`, `ca-certificates` | the remaining Python tools (frame evidence, fingerprints, title scans); AniList GraphQL over TLS (`mkv-anilist`, in Go) |
 | `bash`, `coreutils`, `findutils`, `grep`, `sed`, `gawk`, `jq` | Alpine's busybox applets differ enough from GNU to break scripts subtly |
 | `rsync` | verified copies; `--remove-source-files` only ever under M3 |
 | `mediainfo` | second opinion on container metadata when `ffprobe` is ambiguous |
@@ -102,7 +102,8 @@ cannot be run as root by accident.
 
 ### Baked-in scripts → `/opt/mediaops/bin` (on `PATH`)
 
-Versioned in the image repo under `scripts/`, except `mkv-drives`, `mkv-rip`,
+Versioned in the image repo under `scripts/`, except `mkv-probe`, `mkv-bounds`, `mkv-split`,
+`mkv-order`, `mkv-anilist`, `mkv-audit`, `mkv-drives`, `mkv-rip`,
 `mkv-archive`, `mkv-promote` and `mkv-manifest`, which are Go programs under `cmd/` (shared code in `kit/` and `internal/`) built
 into the image by a `golang` stage; the rest follow the same way, a tool at a time.
 These were developed against the backlog and are the reason this is an image and
@@ -110,10 +111,13 @@ not just a package list:
 
 | Script | Purpose |
 |---|---|
-| `mkv-probe` | bulk inventory → JSON: duration, chapter timecodes, stream layout, per-track |
-| `mkv-bounds` | episode-boundary detection over a Play-All's chapter list; emits the `mkvmerge --split chapters:N,M` argument |
+| `mkv-probe` | Go. Bulk inventory → one JSON object: duration, chapter starts, stream layout, per file (§13) |
+| `mkv-bounds` | Go. Episode-boundary detection over a Play-All's chapter list; emits the `mkvmerge --split chapters:N,M` argument and its grade (§13) |
 | `mkv-frames` | render N timestamped frames from a file, tiled into one contact sheet |
-| `mkv-split` | drive `mkvmerge --split`, then verify part count, per-part duration and total-bytes-vs-source |
+| `mkv-split` | Go. Keyframe and open-GOP precheck, `mkvmerge --split` to `.partial` files, then a mandatory `verify`: packet accounting, timing, decode, seams, bytes; `verify` also runs alone (§13) |
+| `mkv-order` | Go. Proves a disc's track order is episode order from its Play-All's chapter marks (§13) |
+| `mkv-anilist` | Go. Episode count and titles from AniList (§13) |
+| `mkv-audit` | Go. Read-only `series`, `films`, `blindspot`, `sweep` and `postcheck` audits (§13) |
 | `mkv-promote` | Go. Manifest-driven mover with full accounting (§5, §11) |
 | `mkv-archive` | Go. Archive-before-promote into `$ARCHIVE_ROOT/<path within its share>`, preserving the layout the file had (§11) |
 | `mkv-manifest` | Go. `check`, `exec` and `gen` for op manifests: an overlay-replay gate that every `exec` runs first, a journaled, resumable executor, dry run by default (§12) |
@@ -389,7 +393,7 @@ failed, and the last two failed *invisibly*:
   anchoring on its title card puts every cut one chapter late.
 
 No statistic distinguishes these. `mkv-bounds` screens out tracks that are not
-Play-Alls; it **cannot** confirm a real Play-All is being cut in the right
+Play-Alls and says so in the `limit` it prints with every pattern; it **cannot** confirm a real Play-All is being cut in the right
 place. Only frames can — hence `mkv-frames`, and hence the rule that **one
 interior boundary per track is eyeballed before that track is split.** Of the
 tracks a reviewer actually checked, roughly a third had a wrong anchor.
@@ -1046,7 +1050,297 @@ translated into ops. Tests build each fixture's tree in a temp dir and run `chec
 file's own bytes, so moves carry it. A test tagged `integration` runs `remux`, `title`,
 `flags` and `audio_lang` against real mkvtoolnix and ffmpeg.
 
-## 13. The Go toolchain as the ad-hoc runtime
+## 13. Play-All analysis, splitting and audits
+
+`mkv-probe`, `mkv-bounds`, `mkv-split`, `mkv-order`, `mkv-anilist` and `mkv-audit` are the
+tools between a rip and a manifest: they read the tracks, find the episodes in a Play-All,
+cut them out and prove the cut, and audit the library before and after a manifest run. They
+replace `mkv-probe`, `mkv-bounds`, `mkv-split`, `mkv-order` and `mkv-anilist` from `scripts/`
+and the `audit-series`, `audit-films`, `blindspot`, `film-plan-sweep` and per-job
+`postcheck` scripts that lived in plan dirs. They are library tools: run them in the
+workbench pod (`deploy/mediaops`), not the ripper, and they carry no role guard.
+
+```
+mkv-probe PATH... [--workers N]                         inventory: one JSON object
+mkv-bounds FILE EPISODE_MINUTES                         episode boundaries of a Play-All
+mkv-split SRC OUTDIR/PREFIX CH,CH,... [--go] [--tol S] [--allow-open-gop]
+mkv-split SRC OUTDIR/PREFIX --at T,T,... [--go] [--tol S] [--allow-open-gop]
+mkv-split verify SRC PART PART...                       prove a split; reads only
+mkv-order INVENTORY.json [DIR] [--min-episode-minutes 15] [--max-episode-minutes 40]
+mkv-anilist SEARCH | mkv-anilist --id N
+mkv-audit series DIR... | --list FILE  [--workers N]
+mkv-audit films [ROOT...] [--min-minutes 60]
+mkv-audit blindspot [ROOT...]
+mkv-audit sweep MANIFEST [ROOT...] [--min-minutes 60]
+mkv-audit postcheck MANIFEST --before INVENTORY.json [--workers N]
+```
+
+Each prints one JSON value on stdout for exits 0 and 1 and only the `FATAL` line for 2 to 4.
+Flags may sit before or after the positionals. Only regular files are probed or read: a
+FIFO or device under a walked tree is skipped and named, never opened. ffprobe is only run
+with `-of json`, and every child goes through `kit/proc`, whose guard still refuses anything
+that would re-encode.
+
+`ROOT` defaults to the pipeline share's `anime` and `ecchi` categories. A `DIR` or `ROOT`
+that does not exist or is not a directory is exit 2 naming it.
+
+| Exit | probe | bounds | split (dry run / `--go`) | split verify | order | anilist | audit |
+|---|---|---|---|---|---|---|---|
+| 0 | every file probed | a pattern | no findings / split placed and verify clean | clean | every disc `confirmed` | entry printed | clean |
+| 1 | a file failed to probe (its record carries `error`) | no pattern, or no chapters | precheck findings, nothing written / part count wrong or verify findings, parts kept | findings | a disc is `mismatch`, `no_playall` or `unreadable` | n/a | findings |
+| 2 | usage; PATH missing | usage; hint not positive; FILE missing or not regular | usage; SRC not regular; OUTDIR is a file; `%` in OUTDIR/PREFIX; no chapters; chapter out of range; cuts not increasing or outside (0, duration) | usage; SRC given with no parts | usage; inventory unreadable or not an `mkv-probe` document; no record under DIR | usage; AniList says Not Found | usage; missing root, dir, list, manifest or inventory |
+| 3 | n/a | n/a | an output `PREFIX-NNN.mkv` exists | n/a | n/a | n/a | the journal is unusable, as for `mkv-manifest` |
+| 4 | internal | ffprobe failed | ffprobe, mkvmerge or ffmpeg failed, I/O | ffprobe or ffmpeg failed | internal | network, HTTP status, rate limit, bad JSON | internal |
+
+### `mkv-probe`
+
+PATH is a file or a directory. A directory is walked, sorted and without following symlinks,
+for every video (`library.IsVideo`, not only `.mkv`): a library that holds `.ogm` and `.avi`
+episodes is invisible to a probe that filters on `.mkv`. `--workers` defaults to 12.
+
+```json
+{"roots": ["/abs"], "probed": 41, "errors": 0, "skipped": ["/abs/fifo"],
+ "files": [{"path": "/abs/x.mkv", "rel": "share/anime/X/…", "size": 39094659279,
+            "duration": 8550.046, "title": "Fate/Apocrypha",
+            "chapters": [0, 335.669, …],
+            "streams": [{"index": 0, "type": "video", "codec": "h264", "lang": "eng", "title": null,
+                         "default": true, "channels": 0, "width": 1920, "height": 1080}]},
+           {"path": "/abs/bad.mkv", "error": "ffprobe exited 1 …"}]}
+```
+
+Durations and chapter starts are seconds. `rel` is relative to `MEDIA_ROOT` and `null` outside
+it. Records are sorted by path. A file ffprobe cannot read, or whose duration is not a
+positive number, becomes a record with only `path` and `error` and the run goes on; any such
+record makes the exit 1, so a partial inventory is never mistaken for a whole one.
+`internal/inventory` owns the types and `Read`, which `mkv-order` and `mkv-audit postcheck`
+use: a document without a `files` array, or with a record without a `path`, is not an
+inventory.
+
+### `mkv-bounds`
+
+The detector finds the episode length that best fits a Play-All's chapter starts: a greedy
+walk of chapters from the start, a scan of candidate lengths in 0.05-minute steps within
+0.82 to 1.22 times the hint, a 1.5-minute tolerance on each boundary, a 3-minute lead-in, and a
+last episode between 0.55 and 1.9 times the episode length. Candidates are ordered by most
+episodes, then smallest fit error, then earliest boundaries. The hint is required: without one a
+Play-All of 24-minute episodes also fits as twice as many half-episodes (Sailor Moon S01 D01,
+40 chapters: 8 episodes at hint 24, 16 without).
+
+```json
+{"file": "/abs", "duration": 8550.046, "chapters": 26, "hint_minutes": 24,
+ "pattern": true, "episodes": 6, "episode_minutes": 23.7503, "fit_error_minutes": 0.0203,
+ "last_minutes": 23.7495, "grade": "auto", "boundaries": [0, 1425.0, …],
+ "split_chapters": [6, 10, 14, 18, 23], "split": "chapters:6,10,14,18,23",
+ "limit": "A constant offset is invisible to every statistic here: …"}
+```
+
+Durations and boundaries are seconds; `episode_minutes`, `fit_error_minutes` and
+`last_minutes` are the detector's own minutes. `split_chapters` are 1-based chapter numbers,
+the form `mkv-split` takes, and `split` is the same list as `chapters:N,M`. `grade` is `auto`
+when the fit error is at most 0.35 minutes and the episode length is within 12 % of the hint,
+and `review` otherwise. No pattern prints `"pattern": false` and a `reason`, and exits 1.
+
+**The limit.** A set of cuts shifted by a constant offset has the same stride, spread, fit error
+and episode length as the correct set, so no figure here can say the anchor is right (§6). The
+fixture is Demon Slayer S02 D02 (22 chapters): at hint 24 the detector grades `auto` at fit error
+0.226 with `chapters:7,14,20`, while the library's own S02E04 to S02E07 durations put the true cuts
+at chapters 7, 13 and 19, so the second cut lands 1.57 minutes inside E06. The test documents
+that limit rather than a pass, and every pattern carries it in `limit`. One interior boundary per
+track is looked at with `mkv-frames` before the track is split.
+
+### `mkv-split`
+
+**Plan and precheck**, on a dry run and on `--go` alike, reading only. Chapter mode takes
+1-based chapter numbers in `[2, chapters]`, strictly increasing; a cut is at the chapter's
+start. `--at` takes seconds, strictly increasing and inside `(0, duration)`. For each cut time
+`t`, ffprobe reads the first video stream's packets over `[t-2, t+4]`, and:
+
+- **Keyframe, chapter mode.** mkvmerge is handed the chapter numbers and starts each part at
+  the first keyframe at or after the chapter's start, so that is where the cut lands: the first
+  video keyframe with pts at or after `t - 0.001` (the Matroska timestamp scale is a
+  millisecond), which must be within `--tol` after `t` (default 0.042 s, one frame at 24 fps). A
+  keyframe a few milliseconds *before* the chapter start would put the cut a whole GOP late, so
+  it is a finding.
+- **Keyframe, `--at`.** The cut lands on the keyframe nearest `t` on either side, within
+  `--tol` (the earlier on a tie), the acceptance `mkv-split-ts.py` had. mkvmerge is handed that
+  keyframe's own timestamp, built from its integer pts so that no rounding can move it. The
+  Python handed mkvmerge `t`, so a keyframe a few milliseconds before `t` cut a whole GOP late.
+- A cut that misses is a finding, `not a keyframe`, naming the nearest keyframe on each side.
+- **Open GOP.** Any packet after the keyframe, before the next keyframe, whose pts is lower than
+  the keyframe's is a leading picture: the GOP is open and those frames would be lost or
+  undecodable at the start of the part. It is a finding (`open GOP`), turned into a note by
+  `--allow-open-gop`, which records the owner's decision. The splitting reference's rule
+  ("if any boundary has them, the split is not clean") is now a gate.
+
+An output `PREFIX-NNN.mkv` already present is exit 3. A dry run then prints the report and exits
+0, or 1 with findings, and creates nothing, not even OUTDIR.
+
+**`--go`.** Create OUTDIR; discard leftover `PREFIX-NNN.mkv.partial` files (only names ending in
+`.partial` are ever removed); run `mkvmerge -o PREFIX-%03d.mkv.partial --split chapters:…|timestamps:…
+SRC` (exit 0 and 1 are accepted, 2 or more is exit 4 with mkvmerge's tail); require exactly
+`cuts + 1` partials, or a finding with the partials left in place and exit 1; place each as
+`PREFIX-NNN.mkv` without overwriting (an existing file is exit 3); then run `verify` with the
+planned keyframe times and embed its report. The source is never written, renamed or removed,
+and no part is removed on any failure. A split is not done until its verify is clean.
+
+**`mkv-split verify SRC PART...`** takes the parts in order and reads only. Each row is a
+finding when it fails:
+
+| # | Check |
+|---|---|
+| V1 | at least two parts; each a regular file ffprobe can read |
+| V2 | the stream layout of each part (index, type, codec, channels, width, height, language, title, default) equals the source's |
+| V3 | **packet accounting, every stream:** the parts' packets laid end to end equal the source's packets one for one, in order, none dropped and none duplicated. A video stream in AVCC form (h264 or hevc with a NAL length size) compares the MD5 of each payload with every access unit delimiter NAL removed on both sides, because mkvmerge drops those and changes nothing else; a PCM stream is compared as bytes, not packets, because mkvmerge re-frames PCM even on a plain remux: the source's raw sample bytes must equal the parts' laid end to end, by count and MD5 (`compared: bytes` in the report); any other stream compares the payload MD5 of a stream copy. The finding names the stream, part and packet, or the byte totals |
+| V4 | **timing:** per part, the shift is the source's minimum video pts over the part's span minus the part's minimum video pts; every packet of every packet-compared stream lands within 2 ms of its source pts after that shift, and each part's first PCM packet within 2 ms of the sample clock its byte offset gives |
+| V5 | each part's first video packet is a keyframe; its leading pictures are counted, as a note |
+| V6 | a full decode of each part: decoded video frames equal the part's video packets minus its leading pictures, with no decoder error except the known open-GOP notices on a part that has leading pictures |
+| V7 | **seams:** at each cut, the source is decoded over `[cut-6 s, cut+3 s]` continuously; the outgoing part's last decoded frames and the incoming part's first are aligned to it by MD5, and the frames between them are the ones lost. A finding when either side cannot be aligned uniquely, when they overlap, or when any lost frame differs from the outgoing part's last frame (a held frame is invisible; a lost picture is not) |
+| V8 | the parts total 99.0 to 100.5 % of the source's bytes (one set of headers becomes N, and the Play-All's chapter table is dropped) |
+| V9 | from `mkv-split --go` only: each actual cut equals its planned keyframe within 1 ms |
+
+V3 replaces the Python's per-part duration printout. Container duration is reported and never
+judged: mkvmerge zeroes each part on its earliest presentation time, and a subtitle or PCM frame
+straddling the cut moves it. Packet hashes of raw payloads never match across a split, and that
+was read as "packet comparison is impossible"; with the delimiters removed exactly they do.
+
+```json
+{"source": "/abs", "bytes": 1, "duration": 1.0,
+ "parts": [{"path": "/abs/p-001.mkv", "bytes": 1, "duration": 1.0, "cut": null,
+            "first_keyframe": true, "leading_pictures": 0, "decoded_frames": 1, "decode_errors": []}],
+ "streams": [{"index": 0, "type": "video", "codec": "h264", "packets": 1, "accounted": 1,
+              "identical": true, "aud_removed": 1, "max_pts_deviation_ms": 0}],
+ "seams": [{"after_part": 1, "cut": 1425.05, "lost_frames": 0, "lost_identical": true}],
+ "bytes_percent": 99.947, "findings": [{"part": 2, "stream": 0, "problem": "…"}],
+ "notes": [], "clean": true}
+```
+
+The split report is `{"source", "bytes", "duration", "chapters", "mode": "chapters|timestamps",
+"cuts": [{"n", "chapter"?, "requested", "keyframe", "delta_ms", "leading_pictures"}], "outputs",
+"dry_run", "findings": [{"cut"?, "problem"}], "notes", "mkvmerge"?: {"argv", "exit"}, "verify"?:
+{…}, "clean"}`. `clean` on a `--go` is true only when the plan had no findings and `verify` is clean.
+
+### `mkv-order`
+
+Reads `mkv-probe`'s object. Its records under DIR (default: all of them) are grouped by parent
+directory, one disc each, sorted by path. Per disc, the Play-All is the longest track and the
+episodes are the others within `[--min-episode-minutes, --max-episode-minutes]`. A longest track
+shorter than the maximum, or no episodes, is `no_playall`; a disc with an error record is
+`unreadable`. Otherwise the episodes are laid end to end in track order, and each episode's own
+chapter marks, shifted by the time before it, and each boundary between episodes must match the
+Play-All's next chapter marks within 3 seconds; the disc is `confirmed` or `mismatch` with the
+first place it failed.
+
+```json
+{"inventory": "/abs", "dir": "/abs", "confirmed": 2, "total": 3,
+ "discs": [{"dir": "/abs/Disc 01", "status": "confirmed|mismatch|no_playall|unreadable",
+            "playall": "/abs/…_t00.mkv", "episodes": ["…"], "detail": "8 episodes, 40/40 chapters consumed",
+            "episode_minutes_sum": 192.9, "playall_minutes": 192.99}]}
+```
+
+**Gap closed:** the Python selected the series by the third component of the record's `rel`,
+which named the category and never the series once the box segment joined `MEDIA_ROOT`, so it
+silently printed nothing. Discs are now selected by the record's absolute path, and a DIR with
+no record under it is exit 2. A confirmed disc says the tracks are sequential; it never says
+which episode number the first one is.
+
+### `mkv-anilist`
+
+`POST https://graphql.anilist.co` with the Python's query, a `User-Agent` of `mediaops/<version>
+(library normalisation)` (AniList answers 403 without one), a 30-second timeout, and the response
+read through an 8 MiB limit. `--id N` sends only `{"id": N}` and a search only `{"s": "…"}`: the
+`id` variable is omitted rather than sent as `null`, because an explicit null makes AniList answer
+404 for a search that is good. A `Not Found` error is exit 2; any other GraphQL error, HTTP status,
+network failure or unreadable body is exit 4.
+
+```json
+{"id": 10721, "title": {"romaji": "…", "english": "…", "native": "…"}, "episodes": 24,
+ "format": "TV", "year": 2011, "streaming_episodes": ["…"],
+ "note": "streamingEpisodes is ordered but not numbered; treat its order as advisory"}
+```
+
+`episodes`, `format`, `year` and each title may be `null`; so may a streaming episode's title.
+
+### `mkv-audit`
+
+Read-only; the only child is ffprobe. A finding is `{"code", "path", "detail"}` plus `scope`
+(`content` or `extras`, where a rule treats them apart) or `op` (the 1-based manifest position)
+when it has one. Any finding is exit 1. `--workers` defaults to 8.
+
+- **`series`** checks each series directory against the promoted-series rules: `EMPTY`, `LEGACY`
+  (non-Matroska video, to which the track rules do not apply), `UNREADABLE`, `TITLE`,
+  `AUDIO-default-count`, `AUDIO-not-jpn`, `SUBS-default-count`, `LOOSE`, `SHAPE`, `PREFIX`, `NUM`
+  (missing, duplicate) and `LAYOUT`. Episodes are enumerated by video, not by `.mkv`. Output is
+  `{"series": [{"dir", "name", "files", "findings", "clean"}], "clean": n, "total": n}`; a
+  series that holds a FIFO or other special file names it in `skipped`. `--list FILE` reads
+  one directory per line.
+- **`films`** finds entries that break the `Movies/` convention: `YEAR-IN-DIR`, `BARE-FILM` (a
+  loose video of at least `--min-minutes` in a series root with no `Movies/`), `UNREADABLE`,
+  `NO-S99` and `S99-MISPLACED`. Output is `{"roots", "findings", "counts", "clean"}`.
+- **`blindspot`** lists every series with video an `.mkv` filter hides: per series the mkv
+  count, the other-video count by extension and the loose files in its root, as a `BLINDSPOT`
+  finding. Counts come from walking the tree, never from a manifest.
+- **`sweep MANIFEST`** reads an `mkv-manifest` manifest and checks it against the library before
+  it runs: file ops' `src` are the plan's sources, and `rename_dir` and `move_dir` its directory
+  moves. Coverage (`UNCOVERED-YEAR-IN-DIR`, `UNCOVERED-S99`, `UNCOVERED-BARE-FILM`), a `Movies/`
+  subdirectory left holding files the plan does not move (`STRAY-SUBDIR`), container titles of
+  films the plan does not touch (`TITLE-EMPTY`, `TITLE-DIFFERS` against the filename's title), and
+  a directory the plan empties with nothing to remove it (`RESIDUE`). Schema problems in the
+  manifest are `SCHEMA` findings and the sweep runs on what was readable. The post-state shape,
+  prefix, year, number and gap pass is `mkv-manifest check --films` and is not repeated: the report
+  says so in a note.
+- **`postcheck MANIFEST --before INVENTORY.json`** reads the tree a manifest run left behind and
+  reports every way it differs from the manifest, using its journal. `--before` is an
+  `mkv-probe` inventory taken before the run and is required. It finds ops not journaled done
+  (`NOT-DONE`); a file op's `src` still present or `dst` not a regular file (`SRC-REMAINS`,
+  `DST-MISSING`, `ARCHIVE-MISSING`); a directory op's `dst` missing; titles, default flags and
+  languages that do not read back (`TITLE-MISMATCH`, `FLAGS-MISMATCH`, `LANG-MISMATCH`); an
+  `.mkv` destination whose `ffprobe -v error` is not silent or whose duration is not positive
+  (`INTEGRITY`, `UNREADABLE`); a track layout other than the `--before` record of the op's `src`,
+  minus default flags (`TRACKS-CHANGED`; a missing record is `NO-BEFORE`, because a check that
+  cannot run does not pass); a `Season NN` directory whose files do not share one full track
+  signature (`SEASON-SIGNATURE`); and the `series` audit over every series directory a
+  destination lies in. Size changes are notes (`SIZE-CHANGED`), because an in-place title edit
+  may grow a file. Output is `{"manifest", "sha256", "ops", "done", "findings", "notes",
+  "series", "clean"}`. It does not render the identity card sheet; post-rename identity stays
+  its own step.
+
+**Gaps closed.** A missing series or root is exit 2, where `audit-series` printed `EMPTY` for
+it, exactly like a series with nothing in it. An unreadable duration is `UNREADABLE`, where
+`audit-films` read it as 0 minutes and passed it. `sweep` reads the manifests `mkv-manifest`
+runs, not the older `rows` and `dir_renames` plan. `postcheck` is one tool with the
+`--before` comparison built in, instead of four per-job scripts that drifted.
+
+### What changed from the Python
+
+- `mkv-probe` writes one JSON object, not lines, in seconds, not rounded minutes; walks every
+  video extension; skips and names what is not a regular file; fails closed on a bad duration.
+- `mkv-bounds` is the same detector, ported exactly, with the limit and the split chapters in
+  its output.
+- `mkv-split` prechecks keyframes and open GOPs before writing anything, and passes mkvmerge the
+  keyframe's own time for `--at`. The Python verified part count, per-part duration and total
+  bytes; `verify` accounts for every packet, checks timing, decodes each part, compares the seams
+  and holds the byte total to 99.0 to 100.5 %. Outputs are `.partial` until placed, and nothing is
+  overwritten. `mkv-split-ts.py` is `--at`.
+- `mkv-order` selects discs by directory, and a DIR that matches nothing is an error.
+- `mkv-anilist` prints JSON instead of text, takes `--id N` instead of a second positional, and exits 2 for a series AniList does not know.
+- `mkv-audit` replaces the per-plan audit, sweep and postcheck scripts.
+- A missing directory is exit 2 in every tool, not an empty result.
+
+### Tests
+
+`internal/bounds/testdata/` holds `ffprobe -show_format -show_streams -show_chapters -of json`
+output for three Play-Alls, read over NFS for metadata only with the share path rewritten, and a
+`README` recording each source: Fate/Apocrypha S01 D01 (26 chapters, 6 episodes,
+`chapters:6,10,14,18,23`, `auto` at hint 24), Sailor Moon S01 D01 (the half-episode trap) and Demon
+Slayer S02 D02 (the offset limit above). `internal/split` builds synthetic MKVs per test from lavfi
+sources (H.264 with access unit delimiters, PCM, SRT), splits them with mkvmerge, and checks that a
+clean split passes while a dropped packet, a part cut on a non-keyframe and a short part each fail,
+that an `--at` a few milliseconds off a keyframe lands exactly on it, and that in chapter mode a keyframe a few milliseconds before the chapter start is a finding. These tests need ffmpeg and
+mkvtoolnix and fail without them; CI's `test` job installs both and also runs the
+`integration`-tagged tests. `internal/anilist/testdata/` holds recorded responses (a search, an id
+lookup, Not Found), replayed from an `httptest` server.
+
+## 14. The Go toolchain as the ad-hoc runtime
 
 The image carries the Go toolchain so one-off programs run in the pod, where every media
 write has to happen, the way a throwaway `.py` script did. `GOROOT` is `/usr/local/go`,

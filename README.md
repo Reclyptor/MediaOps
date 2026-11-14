@@ -49,16 +49,19 @@ by convention — it is unrepresentable.
 
 | Command | Purpose |
 |---|---|
-| `mkv-probe DIR` | inventory a tree as JSON lines: duration, chapters, streams |
-| `mkv-bounds FILE EP_MINUTES` | find episode boundaries in a Play-All track |
+| `mkv-probe PATH... [--workers N]` | inventory files and trees as one JSON object: duration, chapters, streams, per file |
+| `mkv-bounds FILE EP_MINUTES` | find episode boundaries in a Play-All track; prints the `chapters:N,M` to split on, with its grade |
 | `mkv-frames FILE OUT.png T...` | timestamped frames tiled into one contact sheet |
-| `mkv-split FILE PREFIX CH,CH` | split on chapter numbers, then verify the result |
+| `mkv-split SRC OUTDIR/PREFIX CH,CH [--go]` | plan a split on chapter numbers against the source's keyframes, then (`--go`) split and verify it |
+| `mkv-split SRC OUTDIR/PREFIX --at T,T [--go]` | the same, on times in seconds |
+| `mkv-split verify SRC PART PART...` | prove an existing split: every packet accounted for, the seams, the bytes; reads only |
 | `mkv-archive MANIFEST.json [--go]` | move superseded library files into `$ARCHIVE_ROOT/`, layout preserved |
 | `mkv-promote MANIFEST.json [--go]` | move verified files into the library, with accounting |
 | `mkv-manifest check\|exec MANIFEST [--go]` | replay a manifest of ops against the library, then perform it: renames, archive moves, remux, titles, track flags |
 | `mkv-manifest gen rename-series\|archive-tree …` | print a manifest for a series rename or an archive-tree move |
-| `mkv-order INVENTORY.jsonl SERIES` | prove a disc's track order IS episode order, from its Play-All |
-| `mkv-anilist "<search>"` | episode counts and titles from AniList |
+| `mkv-order INVENTORY.json [DIR]` | prove a disc's track order IS episode order, from its Play-All |
+| `mkv-anilist SEARCH \| --id N` | episode counts and titles from AniList |
+| `mkv-audit series\|films\|blindspot\|sweep\|postcheck …` | read-only audits of the library against the normalisation rules, and of a manifest run against its manifest |
 | `mkv-fingerprint batch\|match` | prove episode adjacency from next-episode previews |
 | `mkv-dupcheck DIR TRACK` | is a track an alternate cut of another, or distinct content? |
 | `mkv-titlescan FILE OUT START END [STEP] [BAND]` | hunt for an episode title card |
@@ -71,7 +74,15 @@ Every mutating tool is **dry-run by default** and needs `--go` to act; `mkv-arch
 `mkv-manifest exec`, which runs `check` first on every invocation, dry or not, and refuses on
 any finding ([`SPEC.md` §12](SPEC.md#12-manifest-runs-mkv-manifest)). The exception is
 `mkv-rip`, which only ever writes new `.partial` directories and refuses to touch an
-existing destination.
+existing destination. `mkv-split` follows the same rule with `.partial` files: it plans
+and checks without writing a byte until `--go`, then places the parts without overwriting
+and never touches the source ([`SPEC.md` §13](SPEC.md#13-play-all-analysis-splitting-and-audits)).
+`mkv-probe`, `mkv-bounds`, `mkv-order`, `mkv-anilist` and `mkv-audit` only read.
+
+`mkv-probe`, `mkv-bounds`, `mkv-split`, `mkv-order`, `mkv-anilist` and `mkv-audit` are
+library tools: run them in the library pod (`deploy/mediaops`), as `mkv-manifest` runs. They
+carry no role guard, but the ripper mounts only the staging tree. Each prints one JSON value
+on stdout for exits 0 and 1 and only a `FATAL` line for 2 to 4.
 
 Also on `PATH`: `mkvmerge`, `mkvpropedit`, `mkvinfo`, `mkvextract`, `ffmpeg`,
 `ffprobe`, `mediainfo`, `montage`, `python3`, `go`, `jq`, `rsync`.
@@ -79,8 +90,23 @@ Also on `PATH`: `mkvmerge`, `mkvpropedit`, `mkvinfo`, `mkvextract`, `ffmpeg`,
 `mkv-order` is the cheapest verification here and worth reaching for first: lay a
 disc's episode files end to end and check whether their chapter marks reproduce the
 Play-All's. If they do, track order is episode order — proven from the disc's own
-authoring, no frames needed. It still cannot tell you *which* episode the first track
+authoring, no frames needed. It reads the object `mkv-probe` wrote, one disc per directory,
+and exits 1 unless every disc is `confirmed`; a disc with no Play-All says `no_playall`
+rather than passing. It still cannot tell you *which* episode the first track
 is; that always needs content.
+
+```bash
+mkv-probe /mnt/media/<share>/_pending/anime/Show > "$PLAN/inventory.json"
+mkv-order "$PLAN/inventory.json" /mnt/media/<share>/_pending/anime/Show/Disc\ 01
+```
+
+`mkv-anilist` takes a search string or `--id N` and prints the entry as JSON; its episode
+titles are ordered but not numbered, so treat their order as advisory. An unknown series is
+exit 2. `mkv-audit` checks the library the way the normalisation rules read it, without
+writing: `series` the promoted-series rules, `films` the `Movies/` convention, `blindspot`
+the media an `.mkv` filter hides, `sweep` a film manifest before it runs, and `postcheck` a
+manifest run after it ([`SPEC.md` §13](SPEC.md#13-play-all-analysis-splitting-and-audits)).
+A directory or root that does not exist is exit 2, not an empty series.
 
 When there is no Play-All — and no title card, and the subtitles are dialogue-only —
 `mkv-fingerprint` is the fallback that still works. Every episode's closing preview is
@@ -183,7 +209,8 @@ staging tree is not a real mount.
 
 ## Development
 
-`mkv-drives`, `mkv-rip`, `mkv-archive`, `mkv-promote` and `mkv-manifest` are Go (`cmd/`, with shared code in `kit/` and `internal/`);
+`mkv-drives`, `mkv-rip`, `mkv-archive`, `mkv-promote`, `mkv-manifest`, `mkv-probe`, `mkv-bounds`,
+`mkv-split`, `mkv-order`, `mkv-anilist` and `mkv-audit` are Go (`cmd/`, with shared code in `kit/` and `internal/`);
 the other tools are still under `scripts/` and move over a tool at a time, in the same
 commit that deletes the script. A tool exists in one language only: CI fails if a name
 is in both `scripts/` and `cmd/`.
@@ -214,7 +241,7 @@ The template imports `kit/`, the packages the tools are built from (`proc`, `ffp
 `mkvtool`, `fsutil`, `paths`). Anything outside the standard library, `kit` and
 `golang.org/x/sys` fails to compile rather than download. The compile cache is on `/work`,
 so the first run after a pod roll pays a few seconds and later ones are sub-second. See
-[`SPEC.md` §13](SPEC.md#13-the-go-toolchain-as-the-ad-hoc-runtime).
+[`SPEC.md` §14](SPEC.md#14-the-go-toolchain-as-the-ad-hoc-runtime).
 
 ## Running a manifest
 
@@ -242,17 +269,62 @@ one. A long run should survive a dropped `kubectl exec`:
 setsid nohup mkv-manifest exec "$PLAN/rename.json" --go </dev/null >"$PLAN/run.log" 2>&1 &
 ```
 
+## Splitting a Play-All
+
+Probe the disc, find the boundaries, look at one, then split. Run it in the library pod:
+
+```bash
+mkv-probe DISC_DIR > "$PLAN/inventory.json"       # one object; exit 1 if any file failed to probe
+mkv-bounds DISC_DIR/title_t00.mkv 24               # the hint (episode minutes) is required
+mkv-frames DISC_DIR/title_t00.mkv "$PLAN/b1.png" 1420 1424 1425 1426 1430   # eyeball one interior boundary
+mkv-split DISC_DIR/title_t00.mkv "$OUT/Show S01 D01" 6,10,14,18,23        # dry run: the plan and its prechecks
+mkv-split DISC_DIR/title_t00.mkv "$OUT/Show S01 D01" 6,10,14,18,23 --go   # split, place, verify
+```
+
+`mkv-bounds` takes the episode length as a hint because without one a Play-All of 24-minute
+episodes also fits as twice as many half-episodes. Its `split` field is the `chapters:…`
+argument and `split_chapters` the same numbers as a list, for `mkv-split`.
+
+`mkv-split` reads the source's own packets around every cut before it writes anything. A cut
+must land on a keyframe within `--tol` (default 0.042 s, one frame at 24 fps), and the
+report names the nearest keyframe on either side when it does not. For a chapter that is the
+first keyframe at or after the chapter's start, because mkvmerge cuts there: a keyframe a few
+milliseconds before the chapter would put the cut a whole GOP late, so it is a finding.
+A keyframe that opens a GOP (pictures after it are shown before it) is a finding too, unless
+`--allow-open-gop` records that you accept it. With `--at`, the cut is the keyframe nearest
+each time on either side, and mkvmerge is given that keyframe's own timestamp rather than the
+one requested; that replaces anime-normalize's `mkv-split-ts.py`.
+
+`--go` writes `PREFIX-NNN.mkv.partial`, places each part without overwriting, and then runs
+`verify`, which is part of the command and not optional. The source is never written,
+renamed or removed, and no part is removed on any failure. Any `PREFIX-NNN.mkv` already
+present is exit 3. `verify` proves the split, and reads only:
+
+```bash
+mkv-split verify SRC PART PART...        # parts in order; exit 1 on any finding
+```
+
+It checks that every packet of every stream is in exactly one part, in order (video compared
+with the access-unit delimiters that mkvmerge drops removed on both sides; PCM, which mkvmerge
+re-frames, compared as one byte stream), that timing
+survives, that every part decodes, that the frames at each seam are the source's, and that the
+parts total 99.0-100.5 % of the source's bytes. Container durations are reported and never
+judged: mkvmerge zeroes each part on its earliest presentation time.
+
 ## The one thing to remember
 
 `mkv-bounds` **cannot tell you a cut lands in the right place.** A set of cuts
 shifted by a constant offset has the same stride, the same spread, the same fit
 error and the same episode length as the correct set. No statistic separates
 them — this was confirmed on a track that graded `auto` at fit error 0.226 and
-cut 1.57 minutes *inside* every episode.
+cut 1.57 minutes *inside* every episode. The `limit` field printed with every
+pattern says so, and `grade: auto` means the track looks like a Play-All, not that
+the anchor is right.
 
 Only frames can settle it. Run `mkv-frames` on one interior boundary per track
 before splitting. Of the tracks that were actually checked, roughly a third were
-anchored wrong.
+anchored wrong. `mkv-split`'s keyframe precheck proves a cut is *clean*, not that it is
+*correct*: a constant offset can land every cut on a keyframe.
 
 The structure to read for:
 
