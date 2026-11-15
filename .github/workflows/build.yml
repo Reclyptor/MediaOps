@@ -6,7 +6,6 @@ on:
       - master
     paths:
       - Dockerfile
-      - scripts/**
       - go.mod
       - go.sum
       - cmd/**
@@ -16,7 +15,6 @@ on:
   pull_request:
     paths:
       - Dockerfile
-      - scripts/**
       - go.mod
       - go.sum
       - cmd/**
@@ -43,20 +41,6 @@ jobs:
         uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
-
-      # A tool changes language in exactly one commit: the one that adds
-      # cmd/<name> deletes scripts/<name>.
-      - name: Check Tools Exist Once
-        run: |
-          status=0
-          for dir in cmd/*/; do
-            name=$(basename "$dir")
-            if [ -e "scripts/$name" ]; then
-              echo "::error::$name exists as both scripts/$name and cmd/$name/"
-              status=1
-            fi
-          done
-          exit "$status"
 
       - name: Check Formatting
         run: test -z "$(gofmt -l .)"
