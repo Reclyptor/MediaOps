@@ -94,10 +94,10 @@ LABEL org.opencontainers.image.title="mediaops" \
 # Every tool here is a stream-copy or a probe -- nothing re-encodes.
 #   mkvtoolnix   mkvmerge (keyframe-exact chapter splitting), mkvpropedit (titles)
 #   ffmpeg       ffprobe for duration/chapters/streams, ffmpeg for frame extraction
-#   imagemagick  montage, for ad-hoc tiling (the mkv-* tools tile with ffmpeg)
-#   font-dejavu  NOT optional: without a font, drawtext/annotate silently produce
-#                unlabelled tiles, and an unlabelled contact sheet cannot be used
-#                to verify a cut point
+#   imagemagick  montage, for ad-hoc tiling (the mkv-* tools tile and label in Go)
+#   font-dejavu  NOT optional for the skills' bash sheets: without a font,
+#                drawtext/annotate silently produce unlabelled tiles, and an
+#                unlabelled contact sheet cannot be used to verify a cut point
 #   sg3_utils    sg_start --eject, sg_raw/sg_turs: the tray and media probes that
 #                never spin a disc (mkv-drives, mkv-rip)
 #   lsscsi       cross-checking sr/sg pairing when sysfs is ambiguous
@@ -198,7 +198,13 @@ RUN chmod 0755 /opt/mediaops/bin/* \
  && /opt/mediaops/bin/mkv-split --version \
  && /opt/mediaops/bin/mkv-order --version \
  && /opt/mediaops/bin/mkv-anilist --version \
- && /opt/mediaops/bin/mkv-audit --version
+ && /opt/mediaops/bin/mkv-audit --version \
+ && /opt/mediaops/bin/mkv-frames --version \
+ && /opt/mediaops/bin/mkv-titlescan --version \
+ && /opt/mediaops/bin/mkv-fingerprint --version \
+ && /opt/mediaops/bin/mkv-dupcheck --version \
+ && /opt/mediaops/bin/mkv-staticcheck --version \
+ && /opt/mediaops/bin/mkv-cards --version
 
 # The library convention is group-writable. The NFS export supplies the group by
 # squashing every client to 3000:3000, so files and directories carry gid 3000, not
@@ -212,9 +218,6 @@ RUN chmod 0755 /opt/mediaops/bin/* \
 # per-caller:
 #   - the Go mkv-* tools      -> they set it at start (internal/cli)
 #   - mkv-split-ts.py         -> os.umask(0o007) in mkvlib.py, which it imports
-#                                (mkv-fingerprint, mkv-dupcheck and mkv-staticcheck
-#                                import nothing that sets it; phase 5 ports them)
-#   - mkv-frames, mkv-titlescan -> `umask 0007` in the script
 #   - `kubectl exec -- bash -c` -> BASH_ENV below, which bash sources even
 #                                  non-interactively
 # NOT covered: `kubectl exec -- sh -c '...'`. Alpine's /bin/sh is busybox ash,
