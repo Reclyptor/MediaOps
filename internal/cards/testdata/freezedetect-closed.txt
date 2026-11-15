@@ -1,0 +1,21 @@
+Input #0, matroska,webm, from 'clip.mkv':
+  Metadata:
+    ENCODER         : Lavf63.1.102
+  Duration: 00:00:20.00, start: 0.000000, bitrate: 371 kb/s
+  Stream #0:0: Video: h264 (Constrained Baseline), yuv420p(tv, progressive), 320x180 [SAR 1:1 DAR 16:9], 25 fps, 25 tbr, 1k tbn
+    Metadata:
+      ENCODER         : Lavc63.1.102 libx264
+      DURATION        : 00:00:20.000000000
+Stream mapping:
+  Stream #0:0 -> #0:0 (h264 (native) -> wrapped_avframe (native))
+Output #0, null, to 'pipe:':
+  Metadata:
+    encoder         : Lavf63.1.102
+  Stream #0:0: Video: wrapped_avframe, yuv420p(tv, progressive), 320x180 [SAR 1:1 DAR 16:9], q=2-31, 200 kb/s, 25 fps, 25 tbn
+    Metadata:
+      encoder         : Lavc63.1.102 wrapped_avframe
+      DURATION        : 00:00:20.000000000
+[Parsed_freezedetect_0 @ 0x7e0334004780] lavfi.freezedetect.freeze_start: 6
+[Parsed_freezedetect_0 @ 0x7e0334004780] lavfi.freezedetect.freeze_duration: 5
+[Parsed_freezedetect_0 @ 0x7e0334004780] lavfi.freezedetect.freeze_end: 11
+[out#0/null @ 0x64a2685eca40] video:145KiB audio:0KiB subtitle:0KiB other streams:0KiB global headers:0KiB muxing overhead: unknown
