@@ -87,7 +87,7 @@ carry no role guard, but the ripper mounts only the staging tree. Each prints on
 on stdout for exits 0 and 1 and only a `FATAL` line for 2 to 4.
 
 Also on `PATH`: `mkvmerge`, `mkvpropedit`, `mkvinfo`, `mkvextract`, `ffmpeg`,
-`ffprobe`, `mediainfo`, `montage`, `python3`, `go`, `jq`, `rsync`.
+`ffprobe`, `mediainfo`, `montage`, `go`, `jq`, `rsync`. There is no Python.
 
 `mkv-order` is the cheapest verification here and worth reaching for first: lay a
 disc's episode files end to end and check whether their chapter marks reproduce the
@@ -223,11 +223,8 @@ staging tree is not a real mount.
 
 ## Development
 
-`mkv-drives`, `mkv-rip`, `mkv-archive`, `mkv-promote`, `mkv-manifest`, `mkv-probe`, `mkv-bounds`,
-`mkv-split`, `mkv-order`, `mkv-anilist` and `mkv-audit` are Go (`cmd/`, with shared code in `kit/` and `internal/`);
-the other tools are still under `scripts/` and move over a tool at a time, in the same
-commit that deletes the script. A tool exists in one language only: CI fails if a name
-is in both `scripts/` and `cmd/`.
+Every tool is Go: one command per directory under `cmd/`, with shared code in `kit/` and
+`internal/`.
 
 ```bash
 go vet ./... && go test -race ./...        # no hardware, network or key needed
@@ -252,9 +249,11 @@ go mod tidy && go run . ARGS
 ```
 
 The template imports `kit/`, the packages the tools are built from (`proc`, `ffprobe`,
-`mkvtool`, `fsutil`, `paths`). Anything outside the standard library, `kit` and
+`frames`, `mkvtool`, `fsutil`, `paths`). Anything outside the standard library, `kit` and
 `golang.org/x/sys` fails to compile rather than download. The compile cache is on `/work`,
-so the first run after a pod roll pays a few seconds and later ones are sub-second. See
+so the first run after a pod roll pays a few seconds and later ones are sub-second.
+`go run` turns every non-zero exit into 1; when the exit code matters, `go build -o
+/tmp/<name> .` and run the binary. See
 [`SPEC.md` §14](SPEC.md#14-the-go-toolchain-as-the-ad-hoc-runtime).
 
 ## Running a manifest

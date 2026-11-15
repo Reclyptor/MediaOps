@@ -85,7 +85,7 @@ is a stream-copy/probe utility with no heavy runtime.
 | `mkvtoolnix` | `mkvmerge` (chapter splitting — keyframe-exact, stream copy), `mkvpropedit` (container titles), `mkvinfo`, `mkvextract` |
 | `ffmpeg` | `ffprobe` for duration/stream/chapter probing; `ffmpeg` for frame extraction |
 | `imagemagick` + `font-dejavu` | `montage` and `drawtext` for the skills' bash contact sheets (the Go `mkv-*` sheets label in Go). The font is not optional — `-annotate` silently produces unlabelled tiles without it, and an unlabelled contact sheet cannot be used to verify a cut point |
-| `python3`, `ca-certificates` | the skills' remaining Python (`mkv-split-ts.py` imports `mkvlib.py`), until phase 6; AniList GraphQL over TLS (`mkv-anilist`, in Go) |
+| `ca-certificates` | AniList GraphQL over TLS (`mkv-anilist`) |
 | `bash`, `coreutils`, `findutils`, `grep`, `sed`, `gawk`, `jq` | Alpine's busybox applets differ enough from GNU to break scripts subtly |
 | `rsync` | verified copies; `--remove-source-files` only ever under M3 |
 | `mediainfo` | second opinion on container metadata when `ffprobe` is ambiguous |
@@ -100,39 +100,39 @@ A `media` user, **uid 3000, gid 100** (`users` — already Alpine's `users`
 group), matching the NAS exactly. `USER media` in the Dockerfile so the image
 cannot be run as root by accident.
 
-### Baked-in scripts → `/opt/mediaops/bin` (on `PATH`)
+### Baked-in tools → `/opt/mediaops/bin` (on `PATH`)
 
 Every tool is a Go program under `cmd/` (shared code in `kit/` and `internal/`), built into
-the image by a `golang` stage. `scripts/` keeps only `mkvlib.py`, for the skill's
-`mkv-split-ts.py`, until phase 6.
+the image by a `golang` stage. The image has no Python: the ad-hoc runtime is the Go
+toolchain (§14), and the build fails if a package pulls `python3` back in.
 These were developed against the backlog and are the reason this is an image and
 not just a package list:
 
-| Script | Purpose |
+| Tool | Purpose |
 |---|---|
-| `mkv-probe` | Go. Bulk inventory → one JSON object: duration, chapter starts, stream layout, per file (§13) |
-| `mkv-bounds` | Go. Episode-boundary detection over a Play-All's chapter list; emits the `mkvmerge --split chapters:N,M` argument and its grade (§13) |
-| `mkv-frames` | Go. N timestamped frames from a file, tiled into one labelled contact sheet (§15) |
-| `mkv-titlescan` | Go. One frame every STEP seconds over a window, tiled; the whole frame by default (§15) |
-| `mkv-fingerprint` | Go. dHash fingerprints of tracks (`hash`, resumable `batch`) and preview-to-body adjacency (`match`) (§15) |
-| `mkv-dupcheck` | Go. One track's body against every other's: alternate cut or distinct content (§15) |
-| `mkv-staticcheck` | Go. Distinct-frame ratio at 1 fps: disc furniture or real content (§15) |
-| `mkv-cards` | Go. Title-card candidates by colour (`find`) or freeze (`freeze`), and `sheet`s of candidates, points, chapters or seams (§15) |
-| `mkv-split` | Go. Keyframe and open-GOP precheck, `mkvmerge --split` to `.partial` files, then a mandatory `verify`: packet accounting, timing, decode, seams, bytes; `verify` also runs alone (§13) |
-| `mkv-order` | Go. Proves a disc's track order is episode order from its Play-All's chapter marks (§13) |
-| `mkv-anilist` | Go. Episode count and titles from AniList (§13) |
-| `mkv-audit` | Go. Read-only `series`, `films`, `blindspot`, `sweep` and `postcheck` audits (§13) |
-| `mkv-promote` | Go. Manifest-driven mover with full accounting (§5, §11) |
-| `mkv-archive` | Go. Archive-before-promote into `$ARCHIVE_ROOT/<path within its share>`, preserving the layout the file had (§11) |
-| `mkv-manifest` | Go. `check`, `exec` and `gen` for op manifests: an overlay-replay gate that every `exec` runs first, a journaled, resumable executor, dry run by default (§12) |
-| `mkv-drives` | Go. One JSON array of the optical drives: serial, device nodes, USB port, link speed, tray/media state (§10) |
-| `mkv-rip` | Go. Staggered, health-gated disc ripping into `_pending` with verification and a manifest; `identify`, `finalize`, `stop` (§10) |
+| `mkv-probe` | Bulk inventory → one JSON object: duration, chapter starts, stream layout, per file (§13) |
+| `mkv-bounds` | Episode-boundary detection over a Play-All's chapter list; emits the `mkvmerge --split chapters:N,M` argument and its grade (§13) |
+| `mkv-frames` | N timestamped frames from a file, tiled into one labelled contact sheet (§15) |
+| `mkv-titlescan` | One frame every STEP seconds over a window, tiled; the whole frame by default (§15) |
+| `mkv-fingerprint` | dHash fingerprints of tracks (`hash`, resumable `batch`) and preview-to-body adjacency (`match`) (§15) |
+| `mkv-dupcheck` | One track's body against every other's: alternate cut or distinct content (§15) |
+| `mkv-staticcheck` | Distinct-frame ratio at 1 fps: disc furniture or real content (§15) |
+| `mkv-cards` | Title-card candidates by colour (`find`) or freeze (`freeze`), and `sheet`s of candidates, points, chapters or seams (§15) |
+| `mkv-split` | Keyframe and open-GOP precheck, `mkvmerge --split` to `.partial` files, then a mandatory `verify`: packet accounting, timing, decode, seams, bytes; `verify` also runs alone (§13) |
+| `mkv-order` | Proves a disc's track order is episode order from its Play-All's chapter marks (§13) |
+| `mkv-anilist` | Episode count and titles from AniList (§13) |
+| `mkv-audit` | Read-only `series`, `films`, `blindspot`, `sweep` and `postcheck` audits (§13) |
+| `mkv-promote` | Manifest-driven mover with full accounting (§5, §11) |
+| `mkv-archive` | Archive-before-promote into `$ARCHIVE_ROOT/<path within its share>`, preserving the layout the file had (§11) |
+| `mkv-manifest` | `check`, `exec` and `gen` for op manifests: an overlay-replay gate that every `exec` runs first, a journaled, resumable executor, dry run by default (§12) |
+| `mkv-drives` | One JSON array of the optical drives: serial, device nodes, USB port, link speed, tray/media state (§10) |
+| `mkv-rip` | Staggered, health-gated disc ripping into `_pending` with verification and a manifest; `identify`, `finalize`, `stop` (§10) |
 
 **Split of responsibility:** stable tooling is baked into the image; *working
 state* — the split manifest, the content-verified corrections, run logs — lives
 on the NAS under `_pending/anime/_plans/`, so iterating on a plan never
-requires an image rebuild. In-flight edits to a script can be run from the NAS
-copy and promoted into the image once settled.
+requires an image rebuild. A one-off program runs from its source in the plan dir
+(§14) and is promoted into a tool once it recurs.
 
 > This split is also a direct response to losing the previous session's entire
 > working set: it was in `/tmp`, and `/tmp` was cleared. Nothing durable goes
@@ -142,8 +142,7 @@ copy and promoted into the image once settled.
 
 `.github/workflows/build.yml`, copied from `Lucebox-DFlash` and extended. A `test`
 job runs on every pull request and every push to `master` touching the image's
-inputs (`Dockerfile`, `scripts/**`, `go.mod`, `go.sum`, `cmd/**`, `kit/**`,
-`internal/**`): no tool may exist as both `scripts/<name>` and `cmd/<name>/`, then
+inputs (`Dockerfile`, `go.mod`, `go.sum`, `cmd/**`, `kit/**`, `internal/**`):
 `gofmt`, `go vet`, a pinned `staticcheck` and `go test -race`. `build-and-push` needs
 `test`, so a failure blocks the image. On a pull request it builds without pushing;
 on `master` it pushes to `ghcr.io` tagged `latest` and `<timestamp>-<shortsha>`, and
@@ -301,8 +300,8 @@ What lands on disk is decided by two separate things, not by the pod's own uid a
 - **The mode comes from the creating process' umask,** and `kubectl exec` runs its
   command directly — not through `CMD` or `ENTRYPOINT` — so the image cannot set it
   centrally. It is set per caller: the Go `mkv-*` tools set it at start (`internal/cli`),
-  `os.umask(0o007)` in `mkvlib.py` (which `mkv-split-ts.py` imports), and
-  `BASH_ENV=/etc/mediaops-profile.sh` for `kubectl exec -- bash -c`.
+  and `BASH_ENV=/etc/mediaops-profile.sh` for `kubectl exec -- bash -c`, which covers a
+  one-off started with `go run` from that shell.
   **Not covered:** `kubectl exec -- sh -c`, since busybox ash reads `$ENV` only when
   interactive. Ad-hoc `sh -c 'mkdir …'` still inherits 022.
 
@@ -1370,6 +1369,14 @@ kubectl -n mediaops exec deploy/mediaops -- bash -c \
 The build proves this offline: a `RUN` copies the template, runs `go mod tidy` and
 `go build` with no network, and fails the image if the template does not resolve `kit` and
 `x/sys`.
+
+`go run` reports any non-zero exit of the program as its own exit 1, followed by an
+`exit status N` line on stderr. A one-off whose exit code carries meaning is built with
+`go build -o /tmp/<name> .` and run directly.
+
+Go replaced Python as the pod's ad-hoc runtime outright: the image has no `python3`, and a
+`RUN ! command -v python3` fails the build if a package dependency brings it back. The
+`.py` files under `_pending/anime/_plans/` are history and no longer run.
 
 ## 15. Frame evidence: sheets, fingerprints and title cards
 
