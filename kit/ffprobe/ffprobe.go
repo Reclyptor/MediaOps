@@ -70,6 +70,9 @@ type Stream struct {
 	NALLengthSize int
 	// SampleRate is the audio sample rate in Hz, 0 when ffprobe prints none.
 	SampleRate int
+	// SampleAspect is the sample (pixel) aspect ratio, 1 when ffprobe prints
+	// none or an unset "0:1".
+	SampleAspect float64
 }
 
 // rawStream is one entry of ffprobe's streams array.
@@ -83,6 +86,7 @@ type rawStream struct {
 	TimeBase      string            `json:"time_base"`
 	NALLengthSize string            `json:"nal_length_size"`
 	SampleRate    string            `json:"sample_rate"`
+	SampleAspect  string            `json:"sample_aspect_ratio"`
 	Disposition   map[string]int    `json:"disposition"`
 	Tags          map[string]string `json:"tags"`
 }
@@ -142,14 +146,42 @@ func convertStreams(raws []rawStream, path string) ([]Stream, error) {
 			}
 			rate = n
 		}
+		sar, err := parseSampleAspect(raw.SampleAspect)
+		if err != nil {
+			return nil, fmt.Errorf("stream %d of %s reports a sample_aspect_ratio of %q, which is not N:D: %w", *raw.Index, path, raw.SampleAspect, err)
+		}
 		streams = append(streams, Stream{
 			Index: *raw.Index, CodecType: *raw.CodecType, CodecName: raw.CodecName,
 			Channels: raw.Channels, Width: raw.Width, Height: raw.Height,
 			Default: raw.Disposition["default"] == 1, Tags: tags,
-			TimeBase: raw.TimeBase, NALLengthSize: nal, SampleRate: rate,
+			TimeBase: raw.TimeBase, NALLengthSize: nal, SampleRate: rate, SampleAspect: sar,
 		})
 	}
 	return streams, nil
+}
+
+// parseSampleAspect reads ffprobe's "N:D". Absent, "N/A" and an unset "0:1"
+// (or any zero numerator or denominator) mean square pixels.
+func parseSampleAspect(raw string) (float64, error) {
+	if raw == "" || raw == "N/A" {
+		return 1, nil
+	}
+	num, den, ok := strings.Cut(raw, ":")
+	if !ok {
+		return 0, fmt.Errorf("no colon")
+	}
+	n, err := strconv.ParseUint(num, 10, 32)
+	if err != nil {
+		return 0, err
+	}
+	d, err := strconv.ParseUint(den, 10, 32)
+	if err != nil {
+		return 0, err
+	}
+	if n == 0 || d == 0 {
+		return 1, nil
+	}
+	return float64(n) / float64(d), nil
 }
 
 // CountFrames decodes the first video stream of path and returns how many

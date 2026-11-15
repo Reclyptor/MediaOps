@@ -98,9 +98,9 @@ func TestStreams(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := []Stream{
-		{Index: 0, CodecType: "video", CodecName: "h264", Width: 1920, Height: 1080, Default: true, Tags: map[string]string{}},
-		{Index: 1, CodecType: "audio", CodecName: "flac", Channels: 2, Tags: map[string]string{"language": "jpn", "title": "Japanese"}},
-		{Index: 2, CodecType: "subtitle", CodecName: "subrip", Default: true, Tags: map[string]string{}},
+		{Index: 0, CodecType: "video", CodecName: "h264", Width: 1920, Height: 1080, Default: true, Tags: map[string]string{}, SampleAspect: 1},
+		{Index: 1, CodecType: "audio", CodecName: "flac", Channels: 2, Tags: map[string]string{"language": "jpn", "title": "Japanese"}, SampleAspect: 1},
+		{Index: 2, CodecType: "subtitle", CodecName: "subrip", Default: true, Tags: map[string]string{}, SampleAspect: 1},
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("streams = %+v, want %+v", got, want)
@@ -108,6 +108,28 @@ func TestStreams(t *testing.T) {
 	wantArgv := []string{"ffprobe", "-v", "error", "-show_streams", "-of", "json", "/x/a.mkv"}
 	if !reflect.DeepEqual(r.argv, wantArgv) {
 		t.Fatalf("argv = %q, want %q", r.argv, wantArgv)
+	}
+}
+
+func TestStreamsSampleAspect(t *testing.T) {
+	for _, tc := range []struct {
+		raw  string
+		want float64
+	}{{`"64:45"`, 64.0 / 45}, {`"1:1"`, 1}, {`"0:1"`, 1}, {`"N/A"`, 1}, {`""`, 1}, {"", 1}} {
+		field := ""
+		if tc.raw != "" {
+			field = `, "sample_aspect_ratio": ` + tc.raw
+		}
+		got, err := Streams(context.Background(), &fakeRunner{res: ok(`{"streams": [{"index": 0, "codec_type": "video"` + field + `}]}`)}, "/x/a.mkv")
+		if err != nil || got[0].SampleAspect != tc.want {
+			t.Errorf("%q: got %+v, %v; want %v", tc.raw, got, err, tc.want)
+		}
+	}
+	for _, raw := range []string{`"abc"`, `"4"`, `"a:b"`, `"-1:2"`, `"1:x"`, `"1:2:3"`} {
+		_, err := Streams(context.Background(), &fakeRunner{res: ok(`{"streams": [{"index": 0, "codec_type": "video", "sample_aspect_ratio": ` + raw + `}]}`)}, "/x/a.mkv")
+		if err == nil || !strings.Contains(err.Error(), "sample_aspect_ratio") {
+			t.Errorf("%s: err = %v, want a sample_aspect_ratio error", raw, err)
+		}
 	}
 }
 
