@@ -109,7 +109,6 @@ RUN apk add --no-cache \
         imagemagick \
         font-dejavu \
         mediainfo \
-        python3 \
         ca-certificates \
         bash \
         coreutils \
@@ -123,6 +122,11 @@ RUN apk add --no-cache \
         sg3_utils \
         lsscsi \
         util-linux-misc
+
+# The pod's ad-hoc runtime is Go (below). An interpreter pulled back in as some
+# package's dependency would quietly become a second one, so its arrival fails
+# the build instead.
+RUN ! command -v python3
 
 # Alpine's ImageMagick 7 ships no type.xml, so it has no font to fall back on and
 # ANY unqualified -label/-annotate dies with "unable to read font `'" -- even
@@ -185,7 +189,6 @@ RUN cp -r /opt/mediaops/src/kit/template /tmp/job && cd /tmp/job \
 # every write to 3000:3000 whatever group the process runs as.
 RUN adduser -u 3000 -G users -D -H -s /bin/bash media
 
-COPY --chown=3000:100 scripts/ /opt/mediaops/bin/
 COPY --chown=3000:100 --from=gobuild /out/ /opt/mediaops/bin/
 RUN chmod 0755 /opt/mediaops/bin/* \
  && /opt/mediaops/bin/mkv-rip --version \
@@ -217,7 +220,6 @@ RUN chmod 0755 /opt/mediaops/bin/* \
 # ENTRYPOINT, so neither can set a umask for exec'd work. Coverage is therefore
 # per-caller:
 #   - the Go mkv-* tools      -> they set it at start (internal/cli)
-#   - mkv-split-ts.py         -> os.umask(0o007) in mkvlib.py, which it imports
 #   - `kubectl exec -- bash -c` -> BASH_ENV below, which bash sources even
 #                                  non-interactively
 # NOT covered: `kubectl exec -- sh -c '...'`. Alpine's /bin/sh is busybox ash,
@@ -228,9 +230,6 @@ RUN printf 'umask 0007\n' > /etc/mediaops-profile.sh \
 
 ENV PATH="/opt/mediaops/bin:/opt/makemkv/bin:${PATH}" \
     BASH_ENV="/etc/mediaops-profile.sh" \
-    PYTHONPATH="/opt/mediaops/bin" \
-    PYTHONDONTWRITEBYTECODE=1 \
-    PYTHONUNBUFFERED=1 \
     MEDIA_ROOT=/mnt/media \
     TZ=America/Chicago
 
