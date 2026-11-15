@@ -84,8 +84,8 @@ is a stream-copy/probe utility with no heavy runtime.
 |---|---|
 | `mkvtoolnix` | `mkvmerge` (chapter splitting — keyframe-exact, stream copy), `mkvpropedit` (container titles), `mkvinfo`, `mkvextract` |
 | `ffmpeg` | `ffprobe` for duration/stream/chapter probing; `ffmpeg` for frame extraction |
-| `imagemagick` + `font-dejavu` | `montage` for timestamped contact sheets. The font is not optional — `-annotate` silently produces unlabelled tiles without it, and an unlabelled contact sheet cannot be used to verify a cut point |
-| `python3`, `ca-certificates` | the remaining Python tools (frame evidence, fingerprints, title scans); AniList GraphQL over TLS (`mkv-anilist`, in Go) |
+| `imagemagick` + `font-dejavu` | `montage` and `drawtext` for the skills' bash contact sheets (the Go `mkv-*` sheets label in Go). The font is not optional — `-annotate` silently produces unlabelled tiles without it, and an unlabelled contact sheet cannot be used to verify a cut point |
+| `python3`, `ca-certificates` | the skills' remaining Python (`mkv-split-ts.py` imports `mkvlib.py`), until phase 6; AniList GraphQL over TLS (`mkv-anilist`, in Go) |
 | `bash`, `coreutils`, `findutils`, `grep`, `sed`, `gawk`, `jq` | Alpine's busybox applets differ enough from GNU to break scripts subtly |
 | `rsync` | verified copies; `--remove-source-files` only ever under M3 |
 | `mediainfo` | second opinion on container metadata when `ffprobe` is ambiguous |
@@ -102,10 +102,9 @@ cannot be run as root by accident.
 
 ### Baked-in scripts → `/opt/mediaops/bin` (on `PATH`)
 
-Versioned in the image repo under `scripts/`, except `mkv-probe`, `mkv-bounds`, `mkv-split`,
-`mkv-order`, `mkv-anilist`, `mkv-audit`, `mkv-drives`, `mkv-rip`,
-`mkv-archive`, `mkv-promote` and `mkv-manifest`, which are Go programs under `cmd/` (shared code in `kit/` and `internal/`) built
-into the image by a `golang` stage; the rest follow the same way, a tool at a time.
+Every tool is a Go program under `cmd/` (shared code in `kit/` and `internal/`), built into
+the image by a `golang` stage. `scripts/` keeps only `mkvlib.py`, for the skill's
+`mkv-split-ts.py`, until phase 6.
 These were developed against the backlog and are the reason this is an image and
 not just a package list:
 
@@ -113,7 +112,12 @@ not just a package list:
 |---|---|
 | `mkv-probe` | Go. Bulk inventory → one JSON object: duration, chapter starts, stream layout, per file (§13) |
 | `mkv-bounds` | Go. Episode-boundary detection over a Play-All's chapter list; emits the `mkvmerge --split chapters:N,M` argument and its grade (§13) |
-| `mkv-frames` | render N timestamped frames from a file, tiled into one contact sheet |
+| `mkv-frames` | Go. N timestamped frames from a file, tiled into one labelled contact sheet (§15) |
+| `mkv-titlescan` | Go. One frame every STEP seconds over a window, tiled; the whole frame by default (§15) |
+| `mkv-fingerprint` | Go. dHash fingerprints of tracks (`hash`, resumable `batch`) and preview-to-body adjacency (`match`) (§15) |
+| `mkv-dupcheck` | Go. One track's body against every other's: alternate cut or distinct content (§15) |
+| `mkv-staticcheck` | Go. Distinct-frame ratio at 1 fps: disc furniture or real content (§15) |
+| `mkv-cards` | Go. Title-card candidates by colour (`find`) or freeze (`freeze`), and `sheet`s of candidates, points, chapters or seams (§15) |
 | `mkv-split` | Go. Keyframe and open-GOP precheck, `mkvmerge --split` to `.partial` files, then a mandatory `verify`: packet accounting, timing, decode, seams, bytes; `verify` also runs alone (§13) |
 | `mkv-order` | Go. Proves a disc's track order is episode order from its Play-All's chapter marks (§13) |
 | `mkv-anilist` | Go. Episode count and titles from AniList (§13) |
@@ -297,8 +301,7 @@ What lands on disk is decided by two separate things, not by the pod's own uid a
 - **The mode comes from the creating process' umask,** and `kubectl exec` runs its
   command directly — not through `CMD` or `ENTRYPOINT` — so the image cannot set it
   centrally. It is set per caller: the Go `mkv-*` tools set it at start (`internal/cli`),
-  `os.umask(0o007)` in `mkvlib.py` (every python `mkv-*` tool imports it), `umask 0007`
-  in `mkv-frames` and `mkv-titlescan`, and
+  `os.umask(0o007)` in `mkvlib.py` (which `mkv-split-ts.py` imports), and
   `BASH_ENV=/etc/mediaops-profile.sh` for `kubectl exec -- bash -c`.
   **Not covered:** `kubectl exec -- sh -c`, since busybox ash reads `$ENV` only when
   interactive. Ad-hoc `sh -c 'mkdir …'` still inherits 022.
@@ -1367,3 +1370,79 @@ kubectl -n mediaops exec deploy/mediaops -- bash -c \
 The build proves this offline: a `RUN` copies the template, runs `go mod tidy` and
 `go build` with no network, and fails the image if the template does not resolve `kit` and
 `x/sys`.
+
+## 15. Frame evidence: sheets, fingerprints and title cards
+
+`mkv-frames`, `mkv-titlescan`, `mkv-fingerprint`, `mkv-dupcheck`, `mkv-staticcheck` and
+`mkv-cards` replace the last frame-evidence scripts in `scripts/` and the skill's
+`cardfind.py` and `cardfreeze.py`, along with the per-job `cards.py`, `chapsheet.py` and
+`seamsheet.py` that plan dirs kept rewriting. They are library tools for the workbench pod.
+
+```
+mkv-frames FILE OUT.png T... [--width 640] [--cols N]
+mkv-titlescan FILE OUT.png START END [--step 3] [--band full|H|H:Y] [--width 340]
+mkv-fingerprint hash FILE PREVIEW_START|none OUT.json
+mkv-fingerprint batch JOBS.tsv OUTDIR [--workers 6]
+mkv-fingerprint match OUTDIR
+mkv-dupcheck OUTDIR TRACK
+mkv-staticcheck FILE... [--workers 4]
+mkv-cards find FILE... [--lo 60] [--hi 200] [--miny/--maxy/--minu/--maxu/--minv/--maxv N]
+                       [--minrun 3] [--static] [--tol 0.01] [--workers 4]
+mkv-cards freeze FILE... [--lo 92] [--hi 520] [--db -30] [--mindur 3.5] [--minv 150]
+                         [--maxv 255] [--minu 0] [--maxu 122] [--minymax 0] [--workers 4]
+mkv-cards sheet OUT.png --candidates REPORT.json|- | --points POINTS.tsv|- |
+                        --chapters FILE [--offset 3] | --seams PART PART...
+                        [--width W] [--cols N] [--subs N]
+```
+
+Times are seconds or `[HH:]MM:SS[.frac]`. Each prints one JSON value on stdout for exits 0
+and 1 and only the `FATAL` line for 2 to 4. Exit 1 means a tile had no frame (a placeholder
+is drawn and the sheet is still written), a fingerprint job failed, `match` has findings, a
+file was unreadable, or `find`/`freeze` found no candidate in some file. `none` is not a
+pass.
+
+**What they write.** Only the `OUT.png`, `OUT.json` or `OUTDIR` you name. A sheet must end in
+`.png`, a fingerprint in `.json`, so no output can be a media file. An existing regular file is
+replaced atomically at mode 0660, and anything else at that path is refused. There is no
+`--go`, because nothing outside the named output is touched.
+
+**Sheets.** ffmpeg decodes each tile to raw RGB through the never-re-encode guard, with the
+display aspect restored, the band cropped, and the frame fitted into a fixed box. Go composes
+the sheet, draws the labels with an embedded 5×7 font and encodes the PNG. Labels no longer
+depend on fontconfig (§9's defect), and one decode can label every frame differently.
+`titlescan` decodes its window once. A sheet holds at most 600 tiles and 100 Mpx.
+
+**Fingerprints.** The dHash is the Python's bit for bit: 9×8 gray, a bit per left-greater-than-
+right pair, the same ffmpeg argv. `internal/dhash/testdata` holds the Python's own output on
+recorded frames, including real ones from Berserk and Cutie Honey. Records are JSON with hex
+hashes. `batch` writes each record whole, so a killed batch resumes and ends byte-identical to
+an uninterrupted one. It skips a record only when it matches the job's path and preview
+start, and it never overwrites one that does not. `match` ranks the way the Python did and
+calls a link `confident` at match ≥ 0.30 and gap ≥ 0.15. A weak link, or two tracks claiming
+one successor, is a finding.
+
+**Title cards.** `find` keeps every 1 fps run that holds the card's colour; `freeze` keeps
+every `freezedetect` span whose colour fits. Both report every candidate with its figures,
+plus the most saturated as `best`. `sheet --candidates` tiles them all. The measured
+signatures are tests:
+
+| Show | Method | Flags |
+|---|---|---|
+| Berserk (red on black, held byte-identical) | find | `--maxy 25 --minv 127 --static` |
+| Cutie Honey (white on red, after red scenery) | find | `--lo 90 --hi 420 --minv 160 --maxu 115`; the most saturated run, not the first |
+| Cutie Honey (card breathes under its fade) | find | `--static --tol 0.5`; 0.01 misses it |
+| Cutie Honey | freeze | defaults (−30 dB; −55 dB finds nothing on its grain), `--minymax` for white glyphs |
+| Cutie Honey E04 (dark blue) | limit | no colour method finds it: read a sheet |
+
+### What changed from the Python
+
+- Every ffmpeg exit status is checked. The Python fingerprint and staticcheck read a dead
+  decode as a track with no frames.
+- A `T` past the end of a file is a placeholder tile and exit 1. It is no longer silently
+  dropped from the sheet.
+- `freeze` notes a freeze still running at the window's end, which the Python dropped.
+  Freezes rejected on colour are listed with their figures.
+- Fingerprints are written at 0660. The Python ran without umask 0007.
+- `PREVIEW_START` of 0 is an error. The Python read it as `none`.
+- `titlescan`'s STEP and BAND, and `batch`'s workers, are flags.
+- Python-era fingerprint directories are not read.

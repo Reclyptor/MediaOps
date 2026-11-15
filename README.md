@@ -51,7 +51,7 @@ by convention — it is unrepresentable.
 |---|---|
 | `mkv-probe PATH... [--workers N]` | inventory files and trees as one JSON object: duration, chapters, streams, per file |
 | `mkv-bounds FILE EP_MINUTES` | find episode boundaries in a Play-All track; prints the `chapters:N,M` to split on, with its grade |
-| `mkv-frames FILE OUT.png T...` | timestamped frames tiled into one contact sheet |
+| `mkv-frames FILE OUT.png T...` | timestamped frames tiled into one labelled contact sheet |
 | `mkv-split SRC OUTDIR/PREFIX CH,CH [--go]` | plan a split on chapter numbers against the source's keyframes, then (`--go`) split and verify it |
 | `mkv-split SRC OUTDIR/PREFIX --at T,T [--go]` | the same, on times in seconds |
 | `mkv-split verify SRC PART PART...` | prove an existing split: every packet accounted for, the seams, the bytes; reads only |
@@ -62,10 +62,12 @@ by convention — it is unrepresentable.
 | `mkv-order INVENTORY.json [DIR]` | prove a disc's track order IS episode order, from its Play-All |
 | `mkv-anilist SEARCH \| --id N` | episode counts and titles from AniList |
 | `mkv-audit series\|films\|blindspot\|sweep\|postcheck …` | read-only audits of the library against the normalisation rules, and of a manifest run against its manifest |
-| `mkv-fingerprint batch\|match` | prove episode adjacency from next-episode previews |
+| `mkv-fingerprint hash\|batch\|match` | prove episode adjacency from next-episode previews |
 | `mkv-dupcheck DIR TRACK` | is a track an alternate cut of another, or distinct content? |
-| `mkv-titlescan FILE OUT START END [STEP] [BAND]` | hunt for an episode title card |
+| `mkv-titlescan FILE OUT.png START END [--step S] [--band B]` | hunt for an episode title card |
 | `mkv-staticcheck FILE...` | is this a real extra, or a disc menu / logo card? |
+| `mkv-cards find\|freeze FILE...` | every held title-card candidate in a window, by colour or by freeze |
+| `mkv-cards sheet OUT.png --candidates\|--points\|--chapters\|--seams …` | one labelled tile per candidate, point, chapter or seam frame |
 | `mkv-drives` | a JSON array of the optical drives: serial, USB port, link speed, tray/media |
 | `mkv-rip start\|identify\|status\|wait\|list\|finalize\|stop` | staggered disc ripping into `_pending`, verified, with a manifest; `identify` reads the discs' title tables; `finalize` re-verifies failed discs |
 
@@ -129,7 +131,7 @@ has no titles.
 It defaults to the **whole frame**. An earlier version hardcoded the lower third, which
 produced a false negative on a series whose card renders upper-right and nearly did on
 another whose card sat just above the crop line — both were then written off as "no title
-card", the worst possible failure for an identity check. `BAND` (`0.55`, `0.30:0.70`, …)
+card", the worst possible failure for an identity check. `--band` (`0.55`, `0.30:0.70`, …)
 narrows the crop to gain resolution, but only *after* you know where that series puts its
 card.
 
@@ -142,6 +144,18 @@ backgrounds and logo cards as ordinary titles; they are the same length as a cre
 OP, so filing by runtime alone puts them in `Extras/`. A menu card is a *still* held for
 40–90 seconds, so hashing at 1 fps and counting distinct frames separates them cleanly —
 0.01–0.04 for furniture against 0.76–0.99 for real content, with no overlap observed.
+
+`mkv-cards` finds a held title card when it moves around the episode. `find` looks for runs
+of 1 fps samples that keep the card's colour (Berserk: `--maxy 25 --minv 127 --static`;
+Cutie Honey: `--lo 90 --hi 420 --minv 160 --maxu 115`), and `freeze` for spans
+`freezedetect` calls frozen whose colour fits. Both report **every** candidate, not one
+winner, and `mkv-cards sheet --candidates` draws one tile per candidate so the card is read
+off the page: a detector that picks one run chose the next-episode preview's white on
+Penguindrum. A file with no candidate is not a pass; it falls back to a sheet.
+
+Every sheet is decoded by ffmpeg and composed and labelled in Go, so its labels do not
+depend on fontconfig. The tools write only the `OUT.png` or fingerprint files you name
+([`SPEC.md` §15](SPEC.md#15-frame-evidence-sheets-fingerprints-and-title-cards)).
 
 Check what a disc's short tracks actually *are* before filing them. On one pass this
 caught three Funimation trailers for entirely unrelated shows sitting inside a series'
