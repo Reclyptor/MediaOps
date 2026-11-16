@@ -230,10 +230,9 @@ RUN printf 'umask 0007\n' > /etc/mediaops-profile.sh \
 
 ENV PATH="/opt/mediaops/bin:/opt/makemkv/bin:${PATH}" \
     BASH_ENV="/etc/mediaops-profile.sh" \
-    MEDIA_ROOT=/mnt/media \
     TZ=America/Chicago
 
 USER media
-WORKDIR /mnt/media
+WORKDIR /work
 
 CMD ["sleep", "infinity"]
