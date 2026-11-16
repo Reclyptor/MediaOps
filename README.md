@@ -13,7 +13,7 @@ and — importantly — [what it does *not* solve](SPEC.md#6-what-this-does-not-
 
 Deployed by Flux from [`Reclyptor/Kubernetes`](https://github.com/Reclyptor/Kubernetes)
 as `apps/mediaops`. It is two long-lived pods from this one image: `deploy/mediaops`,
-the library workbench (any node, `/mnt/primary/videos` mounted read-write at
+the library workbench (any node, each NAS mounted read-write beneath
 `/mnt/media`), and `deploy/mediaops-rip`, the ripper (**`styxeon`**, the worker with
 the wired 10G path to the NAS and the optical drives, with only the staging tree
 mounted). The disc tools run only in the ripper.
@@ -22,7 +22,7 @@ mounted). The disc tools run only in the ripper.
 kubectl -n mediaops exec -it deploy/mediaops -- bash
 ```
 
-Manifest paths stay `MEDIA_ROOT`-relative (`dxp6800/anime/…`), but `/mnt/media`
+Manifest paths stay `MEDIA_ROOT`-relative (`<box>/<category>/…`), but `/mnt/media`
 is a plain directory with one mount per NAS beneath it — **not** a share. Never
 synthesize a sibling path from `MEDIA_ROOT`: it lands on the pod's overlay and is
 destroyed by the next redeploy. Anything that has to know the share resolves it from the file
@@ -75,7 +75,7 @@ by convention — it is unrepresentable.
 | `mkv-cards find\|freeze FILE...` | every held title-card candidate in a window, by colour or by freeze |
 | `mkv-cards sheet OUT.png --candidates\|--points\|--chapters\|--seams …` | one labelled tile per candidate, point, chapter or seam frame |
 | `mkv-drives` | a JSON array of the optical drives: serial, USB port, link speed, tray/media |
-| `mkv-rip start\|identify\|status\|wait\|list\|finalize\|stop` | staggered disc ripping into `_pending`, verified, with a manifest; `identify` reads the discs' title tables; `finalize` re-verifies failed discs |
+| `mkv-rip start\|identify\|status\|wait\|list\|finalize\|stop` | staggered disc ripping into the staging tree, verified, with a manifest; `identify` reads the discs' title tables; `finalize` re-verifies failed discs |
 
 Every mutating tool is **dry-run by default** and needs `--go` to act; `mkv-archive` and
 `mkv-promote` print one JSON report either way ([`SPEC.md` §11](SPEC.md#11-library-moves-mkv-archive-and-mkv-promote)), as does
@@ -104,8 +104,8 @@ rather than passing. It still cannot tell you *which* episode the first track
 is; that always needs content.
 
 ```bash
-mkv-probe /mnt/media/<share>/_pending/anime/Show > "$PLAN/inventory.json"
-mkv-order "$PLAN/inventory.json" /mnt/media/<share>/_pending/anime/Show/Disc\ 01
+mkv-probe "$STAGING_ROOT/<category>/Show" > "$PLAN/inventory.json"
+mkv-order "$PLAN/inventory.json" "$STAGING_ROOT/<category>/Show/Disc 01"
 ```
 
 `mkv-anilist` takes a search string or `--id N` and prints the entry as JSON; its episode
@@ -273,7 +273,7 @@ library pod (`deploy/mediaops`); its lock lives in that pod's `/tmp`, and the ri
 mounts only staging:
 
 ```bash
-mkv-manifest gen rename-series /mnt/media/<share>/anime/Show Show > "$PLAN/rename.json"   # or write one by hand
+mkv-manifest gen rename-series /mnt/media/<box>/<category>/Show Show > "$PLAN/rename.json"   # or write one by hand
 mkv-manifest check "$PLAN/rename.json"        # every finding at once; exit 1 if any
 mkv-manifest exec "$PLAN/rename.json"         # dry run: check, then the plan; touches nothing
 mkv-manifest exec "$PLAN/rename.json" --go    # check again, then perform, journaled
@@ -357,12 +357,12 @@ on its title card puts every cut one chapter late.
 ## Working state
 
 Tools live in the image; **working state lives on the NAS** under
-`_pending/anime/_plans/` (`bin/`, `state/`). Iterating on a plan therefore never
+`$STAGING_ROOT/<category>/_plans/` (`bin/`, `state/`). Iterating on a plan therefore never
 requires an image rebuild, and nothing important is ever kept in a scratchpad —
 one session lost its entire working set to a `/tmp` clear.
 
 This matters more than it looks. The deployment is `strategy: Recreate` with Flux image
 automation, so **pushing a new image redeploys the pod and kills anything running in it**,
-and `/work` is an `emptyDir` that goes with it. Long jobs must write to `/mnt/media`, and
+and `/work` is an `emptyDir` that goes with it. Long jobs must write to the NAS, and
 should be resumable — `mkv-fingerprint batch` skips work already on disk for exactly this
 reason.
