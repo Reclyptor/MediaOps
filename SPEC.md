@@ -12,7 +12,7 @@ and a new Flux app `apps/mediaops` in `Reclyptor/Kubernetes`.
 Give media-library work a permanent home **on the cluster, wired to the NAS**,
 instead of running it from the workstation.
 
-The immediate driver is the `_pending/anime` backlog: 39 entries, 1,100 mkv,
+The immediate driver is the anime staging backlog: 39 entries, 1,100 mkv,
 4.96 TiB, of which 121 MakeMKV "Play-All" tracks (3.15 TiB) must be split into
 ~770 episodes with `mkvmerge --split chapters:`. Measured throughput from the
 workstation is **12.5 MB/s** — its only live NIC is WiFi (`wlp134s0f0`; both
@@ -126,11 +126,11 @@ not just a package list:
 | `mkv-archive` | Archive-before-promote into `$ARCHIVE_ROOT/<path within its share>`, preserving the layout the file had (§11) |
 | `mkv-manifest` | `check`, `exec` and `gen` for op manifests: an overlay-replay gate that every `exec` runs first, a journaled, resumable executor, dry run by default (§12) |
 | `mkv-drives` | One JSON array of the optical drives: serial, device nodes, USB port, link speed, tray/media state (§10) |
-| `mkv-rip` | Staggered, health-gated disc ripping into `_pending` with verification and a manifest; `identify`, `finalize`, `stop` (§10) |
+| `mkv-rip` | Staggered, health-gated disc ripping into the staging tree (`STAGING_ROOT`) with verification and a manifest; `identify`, `finalize`, `stop` (§10) |
 
 **Split of responsibility:** stable tooling is baked into the image; *working
 state* — the split manifest, the content-verified corrections, run logs — lives
-on the NAS under `_pending/anime/_plans/`, so iterating on a plan never
+on the NAS in plan dirs under `STAGING_ROOT`, so iterating on a plan never
 requires an image rebuild. A one-off program runs from its source in the plan dir
 (§14) and is promoted into a tool once it recurs.
 
@@ -227,7 +227,7 @@ also scattered the archive across every NAS and let the working box fill up with
 material that is, by definition, never read again. It is now a single tree,
 configured by **`ARCHIVE_ROOT`**.
 
-The working categories stay on dxp6800 and the archive lives on dxp4800, and
+The working categories stay on one box and the archive lives on another, and
 that split is permanent rather than a migration in progress. **Crossing a
 filesystem boundary is therefore the normal case for every archive move, not an
 exceptional one** — which is exactly what the previous design refused to do.
@@ -926,7 +926,7 @@ executor skips it.
 
 `--films` adds the post-state audit from `manifest-simulate.py`, for series directories
 (`MEDIA_ROOT/<share>/<category>/<series>`) whose `Movies/` any op touches, read through the
-overlay so `_pending` sources work. In `Movies/` there is no subdirectory and no non-video
+overlay so staging sources work. In `Movies/` there is no subdirectory and no non-video
 file; each video is named `<Series> - S99EXX - <Title (YYYY)>[ - partN].ext` with `<Series>`
 equal to the directory name or, for a non-series directory (every video outside `Extras/`
 sits under `Movies/`), `<Title (YYYY)> - S99EXX[ - partN].ext`; the title holds a `(YYYY)` year; the numbers run from 1 with no
@@ -1111,7 +1111,7 @@ episodes is invisible to a probe that filters on `.mkv`. `--workers` defaults to
 
 ```json
 {"roots": ["/abs"], "probed": 41, "errors": 0, "skipped": ["/abs/fifo"],
- "files": [{"path": "/abs/x.mkv", "rel": "share/anime/X/…", "size": 39094659279,
+ "files": [{"path": "/abs/x.mkv", "rel": "<box>/<category>/X/…", "size": 39094659279,
             "duration": 8550.046, "title": "Fate/Apocrypha",
             "chapters": [0, 335.669, …],
             "streams": [{"index": 0, "type": "video", "codec": "h264", "lang": "eng", "title": null,
@@ -1385,7 +1385,7 @@ The build proves this offline: a `RUN` copies the template, runs `go mod tidy` a
 
 Go replaced Python as the pod's ad-hoc runtime outright: the image has no `python3`, and a
 `RUN ! command -v python3` fails the build if a package dependency brings it back. The
-`.py` files under `_pending/anime/_plans/` are history and no longer run.
+`.py` files in the plan dirs under `STAGING_ROOT` are history and no longer run.
 
 ## 15. Frame evidence: sheets, fingerprints and title cards
 
