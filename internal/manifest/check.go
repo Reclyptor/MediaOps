@@ -63,9 +63,15 @@ type CheckReport struct {
 // Check replays the pending ops of m, in order, on an overlay of the real
 // tree and collects every problem. schema is what Load found. j says which ops
 // are done (skipped) and which are in doubt (assessed from the tree); nil is a
-// manifest that never ran. Nothing is written. A manifest with archive ops
-// needs ARCHIVE_ROOT to pass its guard, else the error is a refusal.
+// manifest that never ran. Nothing is written. STAGING_ROOT must be set, because
+// the rmdir_if_empty guard compares against it and an unresolved root would
+// leave that guard silently off. A manifest with archive ops needs ARCHIVE_ROOT
+// to pass its guard. In both cases the error is a refusal.
 func (c Config) Check(m *Manifest, schema []Finding, j *Journal, opts CheckOptions) (CheckReport, error) {
+	staging, err := c.Paths.Staging()
+	if err != nil {
+		return CheckReport{}, cli.Refused(err)
+	}
 	var archiveRoot string
 	for _, op := range m.Ops {
 		if op.IsArchive() {
@@ -79,7 +85,7 @@ func (c Config) Check(m *Manifest, schema []Finding, j *Journal, opts CheckOptio
 	}
 
 	r := &replay{
-		c: c, m: m, j: j, archiveRoot: archiveRoot,
+		c: c, m: m, j: j, stagingRoot: staging, archiveRoot: archiveRoot,
 		ov:      newOverlay(),
 		claimed: map[string]int{},
 		sources: map[string]int{},
@@ -101,6 +107,7 @@ type replay struct {
 	c           Config
 	m           *Manifest
 	j           *Journal
+	stagingRoot string
 	archiveRoot string
 	ov          *overlay
 	claimed     map[string]int
@@ -202,7 +209,7 @@ func (r *replay) contained(op Op) bool {
 		case filepath.Dir(op.Path) == media:
 			r.bad(op.Path, "rmdir_if_empty never removes a share")
 			ok = false
-		case op.Path == filepath.Clean(r.c.Paths.Staging()):
+		case op.Path == r.stagingRoot:
 			r.bad(op.Path, "rmdir_if_empty never removes the staging tree")
 			ok = false
 		}

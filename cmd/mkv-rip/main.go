@@ -11,6 +11,10 @@ import (
 
 func main() {
 	cli.Main("mkv-rip", func(ctx context.Context, args []string, streams cli.IO) error {
-		return rip.Command(ctx, rip.DefaultDeps(), args, streams)
+		d, err := rip.DefaultDeps()
+		if err != nil {
+			return err
+		}
+		return rip.Command(ctx, d, args, streams)
 	})
 }

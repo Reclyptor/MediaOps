@@ -5,6 +5,7 @@ package main
 
 import (
 	"fmt"
+	"os"
 
 	"github.com/reclyptor/mediaops/kit/paths"
 )
@@ -12,5 +13,10 @@ import (
 func main() {
 	cfg := paths.FromEnv()
 	fmt.Println("media root:", cfg.MediaRoot)
-	fmt.Println("staging:   ", cfg.Staging())
+	staging, err := cfg.Staging()
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+	fmt.Println("staging:   ", staging)
 }

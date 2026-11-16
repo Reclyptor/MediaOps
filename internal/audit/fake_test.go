@@ -150,12 +150,15 @@ func newFixture(t *testing.T) *fixture {
 }
 
 func (fx *fixture) deps() Deps {
-	return Deps{Paths: paths.Config{MediaRoot: fx.root}, Runner: fx.ff}
+	return Deps{
+		Paths:  paths.Config{MediaRoot: fx.root, StagingRoot: fx.path("SHARE/_pending")},
+		Runner: fx.ff,
+	}
 }
 
-// shareName is the pipeline share's directory name, which the fixtures spell
-// SHARE so that it is only ever written in kit/paths.
-var shareName = filepath.Base(paths.Config{}.Share())
+// shareName is the directory the fixtures stand in for a NAS share, written
+// SHARE in their paths.
+const shareName = "box"
 
 // path is rel under the fixture root, with a leading SHARE segment standing for
 // the pipeline share.

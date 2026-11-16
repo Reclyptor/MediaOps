@@ -10,6 +10,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/reclyptor/mediaops/internal/cli"
 	"github.com/reclyptor/mediaops/internal/inventory"
 	"github.com/reclyptor/mediaops/internal/library"
 	"github.com/reclyptor/mediaops/internal/manifest"
@@ -293,7 +294,11 @@ func (d Deps) Postcheck(ctx context.Context, m *manifest.Manifest, schema []mani
 
 	rep.Findings = append(rep.Findings, seasonFindings(seasons)...)
 
-	results2, err := AuditSeriesDirs(ctx, d.Runner, d.seriesDirs(subjects), workers)
+	dirs, err := d.seriesDirs(subjects)
+	if err != nil {
+		return PostcheckReport{}, cli.Refused(err)
+	}
+	results2, err := AuditSeriesDirs(ctx, d.Runner, dirs, workers)
 	if err != nil {
 		return PostcheckReport{}, err
 	}

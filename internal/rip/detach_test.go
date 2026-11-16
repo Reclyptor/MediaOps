@@ -139,7 +139,7 @@ func TestDetachSurvivesExecDrop(t *testing.T) {
 					t.Errorf("disc = %s %q, want a promoted copy", d.State, deref(d.Reason))
 				}
 			}
-			assertNoKey(t, p.cfg.Staging())
+			assertNoKey(t, p.cfg.StagingRoot)
 		})
 	}
 }

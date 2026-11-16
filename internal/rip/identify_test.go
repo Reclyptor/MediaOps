@@ -122,7 +122,7 @@ func TestIdentifyNeverEjectsOrRips(t *testing.T) {
 			t.Errorf("identify ran %s %d time(s)", prog, n)
 		}
 	}
-	entries, err := os.ReadDir(g.paths.Staging())
+	entries, err := os.ReadDir(g.paths.StagingRoot)
 	if err != nil {
 		t.Fatal(err)
 	}

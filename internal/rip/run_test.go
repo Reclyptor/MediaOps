@@ -16,7 +16,7 @@ import (
 )
 
 func destOf(g *rig, p int, discIdx int) string {
-	return testPlan(serials(p)...).Discs[discIdx].Destination(g.paths.Staging())
+	return testPlan(serials(p)...).Discs[discIdx].Destination(g.paths.StagingRoot)
 }
 
 func fileMode(t *testing.T, path string) os.FileMode {

@@ -53,7 +53,7 @@ func newRig(t *testing.T) *rig {
 		}
 	}
 	r.d = Deps{
-		Paths:     paths.Config{MediaRoot: r.media, Archive: r.archive, StatDev: r.dev},
+		Paths:     paths.Config{MediaRoot: r.media, Archive: r.archive, StagingRoot: filepath.Join(r.media, "stage", "_pending"), StatDev: r.dev},
 		Runner:    r.tools,
 		Mover:     Mover{Rename: r.rename},
 		FreeBytes: func(string) (uint64, error) { return r.free, nil },

@@ -39,7 +39,7 @@ func newRig(t *testing.T) *rig {
 		}
 	}
 	r.cfg = Config{
-		Paths:   paths.Config{MediaRoot: r.media, Archive: r.archive, StatDev: r.dev},
+		Paths:   paths.Config{MediaRoot: r.media, Archive: r.archive, StagingRoot: filepath.Join(r.media, "nas", "_pending"), StatDev: r.dev},
 		LockDir: filepath.Join(base, "locks"),
 		Version: "test",
 	}

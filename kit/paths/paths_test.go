@@ -18,36 +18,43 @@ func devs(same bool) func(string) (uint64, error) {
 }
 
 func TestStagingGuard(t *testing.T) {
-	mk := func(t *testing.T) Config {
-		return Config{MediaRoot: t.TempDir(), StatDev: devs(false)}
+	mk := func(t *testing.T, same bool) Config {
+		return Config{StagingRoot: filepath.Join(t.TempDir(), "staging"), StatDev: devs(same)}
 	}
 	mkStaging := func(t *testing.T, c Config, mode os.FileMode) {
 		t.Helper()
-		if err := os.MkdirAll(c.Staging(), 0o770); err != nil {
+		if err := os.MkdirAll(c.StagingRoot, 0o770); err != nil {
 			t.Fatal(err)
 		}
-		if err := os.Chmod(c.Staging(), mode); err != nil {
+		if err := os.Chmod(c.StagingRoot, mode); err != nil {
 			t.Fatal(err)
 		}
 	}
 
+	t.Run("unset", func(t *testing.T) {
+		err := Config{StatDev: devs(false)}.CheckStaging()
+		if err == nil || !strings.Contains(err.Error(), "STAGING_ROOT is not set") {
+			t.Fatalf("err = %v, want STAGING_ROOT-not-set", err)
+		}
+	})
+
 	t.Run("missing", func(t *testing.T) {
-		c := mk(t)
+		c := mk(t, false)
 		err := c.CheckStaging()
 		if err == nil || !strings.Contains(err.Error(), "does not exist") {
 			t.Fatalf("err = %v, want does-not-exist", err)
 		}
-		if _, statErr := os.Stat(c.Staging()); !os.IsNotExist(statErr) {
+		if _, statErr := os.Stat(c.StagingRoot); !os.IsNotExist(statErr) {
 			t.Fatalf("the guard created the staging tree: %v", statErr)
 		}
 	})
 
 	t.Run("not a directory", func(t *testing.T) {
-		c := mk(t)
-		if err := os.MkdirAll(filepath.Dir(c.Staging()), 0o770); err != nil {
+		c := mk(t, false)
+		if err := os.MkdirAll(filepath.Dir(c.StagingRoot), 0o770); err != nil {
 			t.Fatal(err)
 		}
-		if err := os.WriteFile(c.Staging(), nil, 0o660); err != nil {
+		if err := os.WriteFile(c.StagingRoot, nil, 0o660); err != nil {
 			t.Fatal(err)
 		}
 		err := c.CheckStaging()
@@ -57,7 +64,7 @@ func TestStagingGuard(t *testing.T) {
 	})
 
 	t.Run("same device as root", func(t *testing.T) {
-		c := Config{MediaRoot: t.TempDir(), StatDev: devs(true)}
+		c := mk(t, true)
 		mkStaging(t, c, 0o770)
 		err := c.CheckStaging()
 		if err == nil || !strings.Contains(err.Error(), "root filesystem") {
@@ -69,7 +76,7 @@ func TestStagingGuard(t *testing.T) {
 		if os.Geteuid() == 0 {
 			t.Skip("root bypasses permission bits")
 		}
-		c := mk(t)
+		c := mk(t, false)
 		mkStaging(t, c, 0o500)
 		err := c.CheckStaging()
 		if err == nil || !strings.Contains(err.Error(), "not writable") {
@@ -78,7 +85,7 @@ func TestStagingGuard(t *testing.T) {
 	})
 
 	t.Run("healthy", func(t *testing.T) {
-		c := mk(t)
+		c := mk(t, false)
 		mkStaging(t, c, 0o770)
 		if err := c.CheckStaging(); err != nil {
 			t.Fatalf("healthy staging refused: %v", err)
@@ -87,37 +94,89 @@ func TestStagingGuard(t *testing.T) {
 }
 
 func TestEnsureRipsRoot(t *testing.T) {
-	c := Config{MediaRoot: t.TempDir(), StatDev: devs(false)}
+	c := Config{StagingRoot: filepath.Join(t.TempDir(), "staging"), StatDev: devs(false)}
 	if err := c.EnsureRipsRoot(); err == nil {
 		t.Fatal("EnsureRipsRoot created state without a staging tree")
 	}
-	if _, err := os.Stat(c.Staging()); !os.IsNotExist(err) {
+	if _, err := os.Stat(c.StagingRoot); !os.IsNotExist(err) {
 		t.Fatalf("staging tree was created: %v", err)
 	}
 
-	if err := os.MkdirAll(c.Staging(), 0o770); err != nil {
+	if err := os.MkdirAll(c.StagingRoot, 0o770); err != nil {
 		t.Fatal(err)
 	}
 	if err := c.EnsureRipsRoot(); err != nil {
 		t.Fatal(err)
 	}
-	if info, err := os.Stat(c.RipsRoot()); err != nil || !info.IsDir() {
+	rips, err := c.RipsRoot()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info, err := os.Stat(rips); err != nil || !info.IsDir() {
 		t.Fatalf("rips root missing: %v", err)
 	}
 }
 
-func TestLayoutAndEnv(t *testing.T) {
-	c := Config{MediaRoot: "/m"}
-	if c.Staging() != "/m/dxp6800/_pending" || c.RipsRoot() != "/m/dxp6800/_pending/.rips" {
-		t.Fatalf("layout wrong: %s %s", c.Staging(), c.RipsRoot())
+func TestEnsureRipsRootUnset(t *testing.T) {
+	if err := (Config{StatDev: devs(false)}).EnsureRipsRoot(); err == nil {
+		t.Fatal("EnsureRipsRoot succeeded without STAGING_ROOT")
 	}
+}
+
+func TestStagingUnset(t *testing.T) {
+	c := Config{MediaRoot: "/m"}
+	got, err := c.Staging()
+	if err == nil || !strings.Contains(err.Error(), "STAGING_ROOT") || !strings.Contains(err.Error(), "no default") {
+		t.Fatalf("Staging() = %q, %v; want an error naming STAGING_ROOT and its missing default", got, err)
+	}
+	if got != "" {
+		t.Fatalf("Staging() = %q on error, want the empty string", got)
+	}
+	if got, err := c.RipsRoot(); err == nil || got != "" {
+		t.Fatalf("RipsRoot() = %q, %v; want an error", got, err)
+	}
+}
+
+func TestStagingLayout(t *testing.T) {
+	c := Config{MediaRoot: "/m", StagingRoot: "/mnt/stage/"}
+	staging, err := c.Staging()
+	if err != nil {
+		t.Fatal(err)
+	}
+	rips, err := c.RipsRoot()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if staging != "/mnt/stage" || rips != "/mnt/stage/.rips" {
+		t.Fatalf("layout wrong: %s %s", staging, rips)
+	}
+}
+
+func TestStagingResolvesRelativeRoot(t *testing.T) {
+	staging, err := Config{StagingRoot: "stage"}.Staging()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !filepath.IsAbs(staging) {
+		t.Fatalf("Staging() = %q, want an absolute path", staging)
+	}
+}
+
+func TestFromEnv(t *testing.T) {
 	t.Setenv("MEDIA_ROOT", "")
-	if got := FromEnv().MediaRoot; got != DefaultMediaRoot {
-		t.Fatalf("default = %q", got)
+	t.Setenv("STAGING_ROOT", "")
+	c := FromEnv()
+	if c.MediaRoot != DefaultMediaRoot {
+		t.Fatalf("default = %q", c.MediaRoot)
+	}
+	if c.StagingRoot != "" {
+		t.Fatalf("STAGING_ROOT defaulted to %q", c.StagingRoot)
 	}
 	t.Setenv("MEDIA_ROOT", "/elsewhere")
-	if got := FromEnv().MediaRoot; got != "/elsewhere" {
-		t.Fatalf("env = %q", got)
+	t.Setenv("STAGING_ROOT", "/staged")
+	c = FromEnv()
+	if c.MediaRoot != "/elsewhere" || c.StagingRoot != "/staged" {
+		t.Fatalf("env = %q, %q", c.MediaRoot, c.StagingRoot)
 	}
 }
 
@@ -240,16 +299,5 @@ func TestShareRoot(t *testing.T) {
 		if got := c.ShareRoot(tc.path); got != tc.want {
 			t.Errorf("ShareRoot(%s) = %s, want %s", tc.path, got, tc.want)
 		}
-	}
-}
-
-func TestShareContainsStaging(t *testing.T) {
-	c := Config{MediaRoot: "/mnt/media"}
-	share := c.Share()
-	if filepath.Dir(share) != c.MediaRoot || share == c.MediaRoot {
-		t.Fatalf("Share() = %q, want a directory directly under the media root", share)
-	}
-	if want := filepath.Join(share, "_pending"); c.Staging() != want {
-		t.Fatalf("Staging() = %q, want %q", c.Staging(), want)
 	}
 }

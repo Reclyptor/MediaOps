@@ -113,16 +113,16 @@ func TestExitCodes(t *testing.T) {
 			setup: func(g *rig) { g.t.Setenv("MAKEMKV_KEY", `a"b`) },
 		},
 		{
-			name: "staging on the root filesystem", args: []string{"list"}, code: 3, stderr: "is on the pod's root filesystem, so the NAS mount is missing",
+			name: "staging on the root filesystem", args: []string{"list"}, code: 3, stderr: "STAGING_ROOT is on the pod's root filesystem",
 			setup: func(g *rig) { g.deps.Paths.StatDev = nil },
 		},
 		{
-			name: "staging missing", args: []string{"status"}, code: 3, stderr: "the staging tree does not exist",
-			setup: func(g *rig) { g.deps.Paths.MediaRoot = filepath.Join(g.t.TempDir(), "nowhere") },
+			name: "staging missing", args: []string{"status"}, code: 3, stderr: "STAGING_ROOT does not exist",
+			setup: func(g *rig) { g.deps.Paths.StagingRoot = filepath.Join(g.t.TempDir(), "nowhere") },
 		},
 		{
-			name: "staging guard before a start", args: []string{"start", "-"}, stdin: validPlan, code: 3, stderr: "the staging tree does not exist",
-			setup: func(g *rig) { g.deps.Paths.MediaRoot = filepath.Join(g.t.TempDir(), "nowhere") },
+			name: "staging guard before a start", args: []string{"start", "-"}, stdin: validPlan, code: 3, stderr: "STAGING_ROOT does not exist",
+			setup: func(g *rig) { g.deps.Paths.StagingRoot = filepath.Join(g.t.TempDir(), "nowhere") },
 		},
 		{
 			name: "wait on a complete run", args: []string{"wait", "20261113-100000-0001"}, code: 0,
@@ -185,7 +185,7 @@ func TestRoleGuard(t *testing.T) {
 			// lease would mark dead on any read.
 			id := "20261113-100000-0001"
 			g.putRun(id, runstore.RunRunning, 0)
-			stateFile := filepath.Join(g.paths.RipsRoot(), id, "state.json")
+			stateFile := filepath.Join(mustRipsRoot(g.t, g.paths), id, "state.json")
 			before, err := os.ReadFile(stateFile)
 			if err != nil {
 				t.Fatal(err)
@@ -280,7 +280,7 @@ func TestListIgnoresOtherDirectories(t *testing.T) {
 
 	g.putRun("20261113-100000-0001", runstore.RunComplete, 0)
 	g.putRun("20261113-100500-0002", runstore.RunIncomplete, 5)
-	root := g.paths.RipsRoot()
+	root := mustRipsRoot(g.t, g.paths)
 	// What the Python tool and the owner left under .rips.
 	mustMkdir(t, filepath.Join(root, "aborted-20261101-120000"))
 	mustMkdir(t, filepath.Join(root, "discinfo"))

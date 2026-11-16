@@ -167,10 +167,14 @@ func seasonFindings(seasons map[string][]seasonFile) []Finding {
 
 // seriesDirs is every series directory under MEDIA_ROOT that one of paths lies
 // in, sorted and without duplicates, leaving out the staging tree and any
-// directory that is not there (its destination check says so).
-func (d Deps) seriesDirs(paths []string) []string {
+// directory that is not there (its destination check says so). It fails when
+// the staging tree cannot be resolved, rather than audit it as a series.
+func (d Deps) seriesDirs(paths []string) ([]string, error) {
 	media := filepath.Clean(d.Paths.MediaRoot)
-	staging := d.Paths.Staging()
+	staging, err := d.Paths.Staging()
+	if err != nil {
+		return nil, err
+	}
 	seen := map[string]bool{}
 	var out []string
 	for _, p := range paths {
@@ -187,5 +191,5 @@ func (d Deps) seriesDirs(paths []string) []string {
 		}
 	}
 	sort.Strings(out)
-	return out
+	return out, nil
 }

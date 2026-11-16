@@ -215,7 +215,7 @@ func TestCheckRootContainment(t *testing.T) {
 	outside := filepath.Join(filepath.Dir(r.media), "elsewhere")
 	putFile(t, outside+"/a.mkv", "a")
 	inside := r.put("nas/p/a.mkv", "a")
-	staging := r.cfg.Paths.Staging()
+	staging := r.cfg.Paths.StagingRoot
 	cases := []struct {
 		name string
 		op   Op
@@ -269,6 +269,29 @@ func TestCheckArchiveRootGuard(t *testing.T) {
 	m, findings, _ = r.manifestOps(Op{Kind: KindRename, Src: src, Dst: r.path("nas/p/b.mkv")})
 	if rep, err := cfg.Check(m, findings, nil, CheckOptions{}); err != nil || !rep.Clean {
 		t.Fatalf("%v %v", err, rep.Findings)
+	}
+}
+
+// An unset STAGING_ROOT must stop the check, not leave the staging-tree guard
+// comparing against an empty path that matches nothing.
+func TestCheckRefusesWithoutStagingRoot(t *testing.T) {
+	r := newRig(t)
+	src := r.put("nas/p/a.mkv", "a")
+	cfg := r.cfg
+	cfg.Paths.StagingRoot = ""
+
+	for name, op := range map[string]Op{
+		"rmdir":  {Kind: KindRmdirIfEmpty, Path: r.path("nas/p")},
+		"rename": {Kind: KindRename, Src: src, Dst: r.path("nas/p/b.mkv")},
+	} {
+		m, findings, _ := r.manifestOps(op)
+		rep, err := cfg.Check(m, findings, nil, CheckOptions{})
+		if cli.Code(err) != cli.ExitRefused || !strings.Contains(err.Error(), "STAGING_ROOT") {
+			t.Errorf("%s: err = %v, want a STAGING_ROOT refusal", name, err)
+		}
+		if len(rep.Findings) != 0 {
+			t.Errorf("%s: a refused check reported findings: %v", name, problems(rep))
+		}
 	}
 }
 

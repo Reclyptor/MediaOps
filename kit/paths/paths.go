@@ -23,67 +23,87 @@ type Config struct {
 	// to be used before ArchiveRoot has checked it.
 	Archive string
 
+	// StagingRoot is STAGING_ROOT as configured. It has no default, and it is
+	// not to be read directly; Staging checks that it is set.
+	StagingRoot string
+
 	// StatDev reports a path's st_dev. Tests replace it, because a temp dir
 	// shares a device with "/" on most CI machines; nil means the real one.
 	StatDev func(path string) (uint64, error)
 }
 
-// FromEnv reads MEDIA_ROOT, defaulting to DefaultMediaRoot, and ARCHIVE_ROOT,
-// which has no default.
+// FromEnv reads MEDIA_ROOT, defaulting to DefaultMediaRoot, and ARCHIVE_ROOT and
+// STAGING_ROOT, which have no default.
 func FromEnv() Config {
 	root := os.Getenv("MEDIA_ROOT")
 	if root == "" {
 		root = DefaultMediaRoot
 	}
-	return Config{MediaRoot: root, Archive: os.Getenv("ARCHIVE_ROOT")}
+	return Config{
+		MediaRoot:   root,
+		Archive:     os.Getenv("ARCHIVE_ROOT"),
+		StagingRoot: os.Getenv("STAGING_ROOT"),
+	}
 }
 
-// Share is the NAS share the anime pipeline works in: anime, ecchi, hentai and
-// the staging tree.
-func (c Config) Share() string {
-	return filepath.Join(c.MediaRoot, "dxp6800")
-}
-
-// Staging is the tree rips land in before they are promoted.
-func (c Config) Staging() string {
-	return filepath.Join(c.Share(), "_pending")
+// Staging is the tree rips land in before they are promoted. It is never the
+// empty string, which filepath.Clean would turn into "." and which the manifest
+// check would then misread as the current directory; an unset STAGING_ROOT is
+// an error instead. It has no default on purpose, because a guessed staging
+// path lands on the pod's overlay and is lost at the next redeploy.
+func (c Config) Staging() (string, error) {
+	if c.StagingRoot == "" {
+		return "", errors.New("STAGING_ROOT is not set; it has no default on purpose, because a guessed staging path lands on the pod's overlay and is lost at the next redeploy")
+	}
+	root, err := filepath.Abs(c.StagingRoot)
+	if err != nil {
+		return "", fmt.Errorf("cannot resolve STAGING_ROOT %s: %w", c.StagingRoot, err)
+	}
+	return root, nil
 }
 
 // RipsRoot holds one directory per rip run.
-func (c Config) RipsRoot() string {
-	return filepath.Join(c.Staging(), ".rips")
+func (c Config) RipsRoot() (string, error) {
+	staging, err := c.Staging()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(staging, ".rips"), nil
 }
 
-// CheckStaging refuses to go on unless the staging tree is the NAS: it must
+// CheckStaging refuses to go on unless STAGING_ROOT is the NAS: it must
 // exist, be a directory on a different filesystem from "/", and be writable and
 // searchable. It never creates the tree, because creating it from the pod would
 // land on the overlay and be discarded at the next image roll.
 func (c Config) CheckStaging() error {
-	staging := c.Staging()
+	staging, err := c.Staging()
+	if err != nil {
+		return err
+	}
 	info, err := os.Stat(staging)
 	switch {
 	case os.IsNotExist(err):
-		return fmt.Errorf("the staging tree does not exist: %s; create it on the NAS, because creating it from the pod would land on the overlay", staging)
+		return fmt.Errorf("STAGING_ROOT does not exist: %s; create it on the NAS, because creating it from the pod would land on the overlay", staging)
 	case err != nil:
-		return fmt.Errorf("cannot stat the staging tree %s: %w", staging, err)
+		return fmt.Errorf("cannot stat STAGING_ROOT %s: %w", staging, err)
 	case !info.IsDir():
-		return fmt.Errorf("the staging path is not a directory: %s", staging)
+		return fmt.Errorf("STAGING_ROOT is not a directory: %s", staging)
 	}
 
 	stagingDev, err := c.Dev(staging)
 	if err != nil {
-		return fmt.Errorf("cannot read the device of the staging tree %s: %w", staging, err)
+		return fmt.Errorf("cannot read the device of STAGING_ROOT %s: %w", staging, err)
 	}
 	rootDev, err := c.Dev("/")
 	if err != nil {
 		return fmt.Errorf("cannot read the device of the root filesystem: %w", err)
 	}
 	if stagingDev == rootDev {
-		return fmt.Errorf("%s is on the pod's root filesystem, so the NAS mount is missing", staging)
+		return fmt.Errorf("STAGING_ROOT is on the pod's root filesystem: %s; the NAS mount is missing", staging)
 	}
 
 	if err := unix.Access(staging, unix.W_OK|unix.X_OK); err != nil {
-		return fmt.Errorf("the staging tree is not writable: %s: %w", staging, err)
+		return fmt.Errorf("STAGING_ROOT is not writable: %s: %w", staging, err)
 	}
 	return nil
 }
@@ -93,7 +113,11 @@ func (c Config) EnsureRipsRoot() error {
 	if err := c.CheckStaging(); err != nil {
 		return err
 	}
-	if err := os.MkdirAll(c.RipsRoot(), 0o770); err != nil {
+	rips, err := c.RipsRoot()
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(rips, 0o770); err != nil {
 		return fmt.Errorf("cannot create the rips directory: %w", err)
 	}
 	return nil

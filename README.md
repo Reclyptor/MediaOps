@@ -34,6 +34,12 @@ it is set, exists, sits on a different device than `/`, and is writable. The val
 comes from a sops-encrypted Secret, not from the deployment manifest: that repo is
 public, and dataset names are not published there.
 
+`STAGING_ROOT` is the tree rips land in and the run state lives under. It has no
+default either: `paths.Config.Staging` returns an error while it is unset, and
+`mkv-rip`, `mkv-promote`, `mkv-archive` and the manifest check refuse to run. The
+`mkv-audit` subcommands `films`, `blindspot` and `sweep` take their `ROOT` arguments
+from the caller and refuse to run without one.
+
 A file archives to the archive root plus its path *within its share*, so
 `<box>/<category>/X/Y.mkv` becomes `<ARCHIVE_ROOT>/<category>/X/Y.mkv`. The box
 name is dropped because a category lives on exactly one box. The working
@@ -204,7 +210,7 @@ One controller at a time: whoever may spin a drive (a rip, a `finalize`, an `ide
 holds a lock in the ripper pod, and a second one is refused with exit 3, naming the holder.
 Every command prints one JSON value; errors are one `mkv-rip: FATAL:` line.
 
-Rips land in `$MEDIA_ROOT/dxp6800/_pending/` as `<dest>.partial/` and are renamed into
+Rips land in `$STAGING_ROOT/` as `<dest>.partial/` and are renamed into
 place only after the run passes: makemkvcon exit 0, no read errors, every file's
 duration within 2% of what MakeMKV reported. A `manifest.json` records every title, so
 classification can read it instead of re-probing. Each disc is first read with
@@ -217,7 +223,7 @@ are in [`SPEC.md` §10](SPEC.md#10-disc-ripping-mkv-drives-and-mkv-rip).
 
 The licence key arrives as `$MAKEMKV_KEY` and is written to `$HOME/.MakeMKV/` on the
 `/work` emptyDir. It never touches the NAS. Run state is the opposite: it lives on the
-NAS at `_pending/.rips/<run-id>/` (state, plan, controller log, per-disc rip and info logs),
+NAS at `$STAGING_ROOT/.rips/<run-id>/` (state, plan, controller log, per-disc rip and info logs),
 so a pod roll cannot lose the record of what was ripped. `mkv-rip` refuses to run if the
 staging tree is not a real mount.
 

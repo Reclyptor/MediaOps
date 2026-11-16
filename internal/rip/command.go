@@ -71,7 +71,11 @@ func (d Deps) cmdStart(ctx context.Context, args []string, streams cli.IO) error
 	if err != nil {
 		return cli.Usage(fmt.Errorf("cannot read the plan %s: %w", args[0], err))
 	}
-	p, err := plan.Parse(data, d.Paths.Staging())
+	staging, err := d.Paths.Staging()
+	if err != nil {
+		return cli.Refused(err)
+	}
+	p, err := plan.Parse(data, staging)
 	if err != nil {
 		return cli.Usage(fmt.Errorf("bad plan %s: %w", args[0], err))
 	}

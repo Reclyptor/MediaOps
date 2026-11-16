@@ -124,11 +124,11 @@ func TestFilmsGroupsByCode(t *testing.T) {
 	}
 }
 
-func TestFilmsDefaultRootsAndMissingRoot(t *testing.T) {
+func TestFilmsRoots(t *testing.T) {
 	fx := newFixture(t)
-	fx.mkdir("SHARE/anime/A (2010)")
-	fx.mkdir("SHARE/ecchi/B (2011)")
-	code, out, _ := run(t, fx.deps(), "films")
+	fx.mkdir("a/A (2010)")
+	fx.mkdir("b/B (2011)")
+	code, out, _ := run(t, fx.deps(), "films", fx.path("a"), fx.path("b"))
 	if code != 1 || strings.Count(out, "YEAR-IN-DIR") < 2 {
 		t.Fatalf("code %d: %s", code, out)
 	}
@@ -136,9 +136,31 @@ func TestFilmsDefaultRootsAndMissingRoot(t *testing.T) {
 	if code != 2 || out != "" || !strings.Contains(errOut, "nowhere") {
 		t.Fatalf("code %d, %q, %q", code, out, errOut)
 	}
-	empty := newFixture(t)
-	if code, _, errOut := run(t, empty.deps(), "films"); code != 2 || !strings.Contains(errOut, "anime") {
-		t.Fatalf("default roots missing: code %d: %s", code, errOut)
+}
+
+// The audits name no library folders of their own, so a call without a ROOT is
+// a usage error that prints the usage line, not a walk of some default tree.
+func TestAuditWithoutRootIsUsage(t *testing.T) {
+	fx := newFixture(t)
+	m := fx.plain("m.json")
+	cases := []struct {
+		name  string
+		args  []string
+		usage string
+	}{
+		{"films", []string{"films"}, usageFilms},
+		{"films with only a flag", []string{"films", "--min-minutes", "30"}, usageFilms},
+		{"blindspot", []string{"blindspot"}, usageBlindspot},
+		{"sweep", []string{"sweep", m}, usageSweep},
+		{"sweep with only a flag", []string{"sweep", m, "--min-minutes", "30"}, usageSweep},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			code, out, errOut := run(t, fx.deps(), tc.args...)
+			if code != 2 || out != "" || !strings.Contains(errOut, tc.usage) {
+				t.Fatalf("code %d, stdout %q, stderr %q; want exit 2 and %q", code, out, errOut, tc.usage)
+			}
+		})
 	}
 }
 
@@ -191,11 +213,12 @@ func TestBlindspotCommand(t *testing.T) {
 	fx := newFixture(t)
 	fx.plain("SHARE/anime/Clean/Season 01/e1.mkv")
 	fx.plain("SHARE/ecchi/Clean/Season 01/e1.mkv")
-	if code, out, _ := run(t, fx.deps(), "blindspot"); code != 0 || !strings.Contains(out, `"clean": true`) {
+	roots := []string{fx.path("SHARE/anime"), fx.path("SHARE/ecchi")}
+	if code, out, _ := run(t, fx.deps(), append([]string{"blindspot"}, roots...)...); code != 0 || !strings.Contains(out, `"clean": true`) {
 		t.Fatalf("code %d: %s", code, out)
 	}
 	fx.plain("SHARE/ecchi/Old/e1.ogv")
-	code, out, _ := run(t, fx.deps(), "blindspot")
+	code, out, _ := run(t, fx.deps(), append([]string{"blindspot"}, roots...)...)
 	if code != 1 || !strings.Contains(out, `"ogv": 1`) {
 		t.Fatalf("an .ogv is a video: code %d: %s", code, out)
 	}

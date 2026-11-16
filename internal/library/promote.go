@@ -191,6 +191,10 @@ func (d Deps) Promote(ctx context.Context, entries []PromoteEntry, run bool) (Pr
 		return rep, err
 	}
 	rep.DryRun = !run
+	staging, err := d.Paths.Staging()
+	if err != nil {
+		return rep, cli.Refused(err)
+	}
 	if !run {
 		return rep, nil
 	}
@@ -247,7 +251,7 @@ func (d Deps) Promote(ctx context.Context, entries []PromoteEntry, run bool) (Pr
 		rep.Titled++
 	}
 
-	removed, warnings := d.sweep(rep.sources)
+	removed, warnings := d.sweep(staging, rep.sources)
 	rep.RemovedDirs, rep.Warnings = append(rep.RemovedDirs, removed...), append(rep.Warnings, warnings...)
 	return rep, nil
 }

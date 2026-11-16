@@ -127,6 +127,10 @@ func (d Deps) Archive(ctx context.Context, entries []ArchiveEntry, run bool) (Ar
 		return rep, err
 	}
 	rep.DryRun = !run
+	staging, err := d.Paths.Staging()
+	if err != nil {
+		return rep, cli.Refused(err)
+	}
 	if !run {
 		return rep, nil
 	}
@@ -157,7 +161,7 @@ func (d Deps) Archive(ctx context.Context, entries []ArchiveEntry, run bool) (Ar
 	for i, m := range rep.Moves {
 		srcs[i] = m.src
 	}
-	removed, warnings := d.sweep(srcs)
+	removed, warnings := d.sweep(staging, srcs)
 	rep.RemovedDirs, rep.Warnings = append(rep.RemovedDirs, removed...), append(rep.Warnings, warnings...)
 	return rep, nil
 }

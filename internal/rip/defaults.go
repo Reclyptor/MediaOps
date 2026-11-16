@@ -11,22 +11,27 @@ import (
 	"github.com/reclyptor/mediaops/kit/proc"
 )
 
-// DefaultDeps is the real machine: the NAS under MEDIA_ROOT, the optical drives
-// in /sys/class/block, and the drive lease in the pod's /tmp.
-func DefaultDeps() Deps {
+// DefaultDeps is the real machine: the staging tree at STAGING_ROOT, the optical
+// drives in /sys/class/block, and the drive lease in the pod's /tmp. It refuses
+// when STAGING_ROOT is unset, because the run store lives under it.
+func DefaultDeps() (Deps, error) {
 	cfg := paths.FromEnv()
+	ripsRoot, err := cfg.RipsRoot()
+	if err != nil {
+		return Deps{}, cli.Refused(err)
+	}
 	runner := &proc.Exec{}
 	return Deps{
 		Paths:       cfg,
 		Drives:      drives.NewHost(runner),
 		Runner:      runner,
-		Store:       &runstore.Store{Root: cfg.RipsRoot(), Live: leaseLiveness{path: lease.DefaultPath}},
+		Store:       &runstore.Store{Root: ripsRoot, Live: leaseLiveness{path: lease.DefaultPath}},
 		Clock:       systemClock{},
 		LeasePath:   lease.DefaultPath,
 		SysBlock:    "/sys/class/block",
 		ToolVersion: cli.Version,
 		Exe:         "/proc/self/exe",
-	}
+	}, nil
 }
 
 type systemClock struct{}

@@ -245,6 +245,15 @@ Its value is carried in a sops-encrypted Secret rather than written into
 there is to name dataset roots only and never enumerate what sits beneath them —
 the set of category names is itself the thing worth not publishing.
 
+`STAGING_ROOT` is the staging tree rips land in, and it has **no default** for the
+same reason. A guessed staging path lands on the overlay, and the layout of the NAS
+is not something this public repository spells out. `paths.Config.Staging` returns an
+error while the variable is unset, never an empty string, because the manifest check
+compares `rmdir_if_empty` against it and an empty path would quietly switch that guard
+off. `CheckStaging` applies the same tests as the archive root. The audit subcommands
+`films`, `blindspot` and `sweep` likewise name no library folders: the caller passes
+every `ROOT`, and a call without one is a usage error.
+
 **The archive dataset needs its own line in `/etc/exports` on the NAS.** It is a
 ZFS dataset, so it is a filesystem of its own, and the kernel NFS server does not
 serve a child filesystem through its parent's export. An unexported child is not
@@ -604,7 +613,7 @@ prints the run id, or the refusal and its exit code. A refused start leaves noth
 behind. `makemkvcon` children carry `Pdeathsig: SIGKILL`, so a killed controller does
 not leave a process reading a drive.
 
-**State.** `$MEDIA_ROOT/dxp6800/_pending/.rips/<run-id>/` on the NAS holds `plan.json`
+**State.** `$STAGING_ROOT/.rips/<run-id>/` on the NAS holds `plan.json`
 (the validated request, immutable), `state.json` (schema 2, the only mutable file),
 `controller.log`, and `disc-NN/` with `info.log`, `rip.log` and one
 `finalize-N.info.log` per finalize attempt; nothing is overwritten. It is not on the
@@ -643,7 +652,7 @@ last five optional. A series disc is `{serial, category: anime|tv|hentai, series
 disc}` and a movie `{serial, category: "movies", title}`; `season: null` is allowed only
 for hentai or a disc carrying `container_title`. Unknown keys, duplicate serials and
 duplicate destinations are rejected, and the message names the entry. Destinations, under
-`$MEDIA_ROOT/dxp6800/_pending/`: `<category>/<Series>/Season XX/Disc XX/` (hentai with a
+`$STAGING_ROOT/`: `<category>/<Series>/Season XX/Disc XX/` (hentai with a
 null season drops `Season XX`), `movies/<Title (Year)>/`. Only `/` is sanitised in
 directory names, to ` - `.
 
@@ -1071,9 +1080,9 @@ mkv-split verify SRC PART PART...                       prove a split; reads onl
 mkv-order INVENTORY.json [DIR] [--min-episode-minutes 15] [--max-episode-minutes 40]
 mkv-anilist SEARCH | mkv-anilist --id N
 mkv-audit series DIR... | --list FILE  [--workers N]
-mkv-audit films [ROOT...] [--min-minutes 60]
-mkv-audit blindspot [ROOT...]
-mkv-audit sweep MANIFEST [ROOT...] [--min-minutes 60]
+mkv-audit films ROOT... [--min-minutes 60]
+mkv-audit blindspot ROOT...
+mkv-audit sweep MANIFEST ROOT... [--min-minutes 60]
 mkv-audit postcheck MANIFEST --before INVENTORY.json [--workers N]
 ```
 

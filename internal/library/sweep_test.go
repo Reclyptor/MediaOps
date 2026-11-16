@@ -13,7 +13,7 @@ func TestSweep(t *testing.T) {
 		if err := os.Remove(src); err != nil { // the move took the file
 			t.Fatal(err)
 		}
-		removed, warnings := r.d.sweep([]string{src})
+		removed, warnings := r.d.sweep(r.d.Paths.StagingRoot, []string{src})
 		if len(removed) != 3 || len(warnings) != 0 {
 			t.Fatalf("removed %v, warnings %v", removed, warnings)
 		}
@@ -31,7 +31,7 @@ func TestSweep(t *testing.T) {
 		src := r.put("box/anime/X/Season 01/a.mkv", "x")
 		sibling := r.put("box/anime/X/Season 02/b.mkv", "y")
 		_ = os.Remove(src)
-		removed, _ := r.d.sweep([]string{src})
+		removed, _ := r.d.sweep(r.d.Paths.StagingRoot, []string{src})
 		if len(removed) != 1 || removed[0] != r.path("box/anime/X/Season 01") {
 			t.Fatalf("removed %v", removed)
 		}
@@ -45,7 +45,7 @@ func TestSweep(t *testing.T) {
 		src := r.put("box/anime/X/a.mkv", "x")
 		keep := r.put("box/anime/X/.hidden", "h")
 		_ = os.Remove(src)
-		if removed, _ := r.d.sweep([]string{src}); len(removed) != 0 || !r.exists(keep) {
+		if removed, _ := r.d.sweep(r.d.Paths.StagingRoot, []string{src}); len(removed) != 0 || !r.exists(keep) {
 			t.Fatalf("removed %v", removed)
 		}
 	})
@@ -57,7 +57,7 @@ func TestSweep(t *testing.T) {
 		a := r.put("box/anime/a.mkv", "x")
 		other := r.mkdir("boxes/anime")
 		_ = os.Remove(a)
-		r.d.sweep([]string{a})
+		r.d.sweep(r.d.Paths.StagingRoot, []string{a})
 		for _, p := range []string{r.path("box"), r.path("boxes"), other, r.media} {
 			if !r.exists(p) {
 				t.Errorf("%s was removed", p)
@@ -67,11 +67,11 @@ func TestSweep(t *testing.T) {
 
 	t.Run("never removes the staging tree", func(t *testing.T) {
 		r := newRig(t)
-		staging := r.d.Paths.Staging()
+		staging := r.d.Paths.StagingRoot
 		src := filepath.Join(staging, "anime", "X", "a.mkv")
 		putFile(t, src, "x")
 		_ = os.Remove(src)
-		removed, _ := r.d.sweep([]string{src})
+		removed, _ := r.d.sweep(r.d.Paths.StagingRoot, []string{src})
 		if len(removed) != 2 {
 			t.Fatalf("removed %v, want the two directories below the staging tree", removed)
 		}
@@ -85,7 +85,7 @@ func TestSweep(t *testing.T) {
 		outside := filepath.Join(filepath.Dir(r.media), "elsewhere", "a")
 		putFile(t, filepath.Join(outside, "a.mkv"), "x")
 		_ = os.Remove(filepath.Join(outside, "a.mkv"))
-		if removed, _ := r.d.sweep([]string{filepath.Join(outside, "a.mkv")}); len(removed) != 0 || !r.exists(outside) {
+		if removed, _ := r.d.sweep(r.d.Paths.StagingRoot, []string{filepath.Join(outside, "a.mkv")}); len(removed) != 0 || !r.exists(outside) {
 			t.Fatalf("removed %v", removed)
 		}
 	})
@@ -94,7 +94,7 @@ func TestSweep(t *testing.T) {
 		r := newRig(t)
 		src := r.put("loose.mkv", "x")
 		_ = os.Remove(src)
-		if removed, _ := r.d.sweep([]string{src}); len(removed) != 0 || !r.exists(r.media) {
+		if removed, _ := r.d.sweep(r.d.Paths.StagingRoot, []string{src}); len(removed) != 0 || !r.exists(r.media) {
 			t.Fatalf("removed %v", removed)
 		}
 	})
@@ -105,7 +105,7 @@ func TestSweep(t *testing.T) {
 		r.d.Paths.StatDev = func(string) (uint64, error) { return 1, nil }
 		src := r.put("box/anime/X/a.mkv", "x")
 		_ = os.Remove(src)
-		removed, _ := r.d.sweep([]string{src})
+		removed, _ := r.d.sweep(r.d.Paths.StagingRoot, []string{src})
 		if len(removed) != 2 || !r.exists(r.path("box")) {
 			t.Fatalf("removed %v", removed)
 		}
@@ -121,7 +121,7 @@ func TestSweep(t *testing.T) {
 			t.Fatal(err)
 		}
 		t.Cleanup(func() { _ = os.Chmod(locked, 0o770) })
-		removed, warnings := r.d.sweep([]string{src})
+		removed, warnings := r.d.sweep(r.d.Paths.StagingRoot, []string{src})
 		if len(removed) != 0 || len(warnings) != 1 {
 			t.Fatalf("removed %v, warnings %v", removed, warnings)
 		}
@@ -131,7 +131,7 @@ func TestSweep(t *testing.T) {
 		r := newRig(t)
 		a, b := r.put("box/anime/X/a.mkv", "x"), r.put("box/anime/X/b.mkv", "y")
 		_, _ = os.Remove(a), os.Remove(b)
-		removed, warnings := r.d.sweep([]string{a, b})
+		removed, warnings := r.d.sweep(r.d.Paths.StagingRoot, []string{a, b})
 		if len(removed) != 2 || len(warnings) != 0 {
 			t.Fatalf("removed %v, warnings %v", removed, warnings)
 		}

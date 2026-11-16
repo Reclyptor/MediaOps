@@ -536,6 +536,16 @@ type aliveAlways struct{}
 
 func (aliveAlways) Alive(string) (bool, error) { return true, nil }
 
+// mustRipsRoot is cfg's rips directory, for fixtures whose StagingRoot is set.
+func mustRipsRoot(t testing.TB, cfg paths.Config) string {
+	t.Helper()
+	root, err := cfg.RipsRoot()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return root
+}
+
 // rig is a Run's world: fakes, a staging tree and a run store in temp dirs.
 type rig struct {
 	t      *testing.T
@@ -555,14 +565,15 @@ type rig struct {
 func newRig(t *testing.T, scale float64, serials ...string) *rig {
 	t.Helper()
 	root := t.TempDir()
-	cfg := paths.Config{MediaRoot: root}
-	if err := os.MkdirAll(cfg.RipsRoot(), 0o770); err != nil {
+	cfg := paths.Config{MediaRoot: root, StagingRoot: filepath.Join(root, "staging")}
+	ripsRoot := mustRipsRoot(t, cfg)
+	if err := os.MkdirAll(ripsRoot, 0o770); err != nil {
 		t.Fatal(err)
 	}
 	clock := newClock(scale)
 	g := &rig{
 		t: t, clock: clock, sys: newFakeSys(t), drives: &fakeDrives{}, runner: newFakeRunner(clock),
-		paths: cfg, store: &runstore.Store{Root: cfg.RipsRoot(), Live: aliveAlways{}, Now: clock.Now}, log: &syncBuffer{},
+		paths: cfg, store: &runstore.Store{Root: ripsRoot, Live: aliveAlways{}, Now: clock.Now}, log: &syncBuffer{},
 	}
 	for i, serial := range serials {
 		g.drives.list = append(g.drives.list, g.sys.add(t, serial, i, fmt.Sprintf("5-1.%d", i+1)))

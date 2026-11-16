@@ -292,7 +292,7 @@ func TestPromoteGoSameShareRenames(t *testing.T) {
 
 func TestPromoteGoAcrossShares(t *testing.T) {
 	r := newRig(t)
-	staging := filepath.Join(r.d.Paths.Staging(), "anime", "X")
+	staging := filepath.Join(r.d.Paths.StagingRoot, "anime", "X")
 	rel, _ := filepath.Rel(r.media, staging)
 	entries := threeEpisodes(t, r, rel)
 	before := r.contents()
@@ -308,14 +308,14 @@ func TestPromoteGoAcrossShares(t *testing.T) {
 		t.Fatal("the library lost or invented bytes")
 	}
 	// The rip folder and its category are swept; the staging tree is not.
-	if r.exists(staging) || !r.exists(r.d.Paths.Staging()) {
+	if r.exists(staging) || !r.exists(r.d.Paths.StagingRoot) {
 		t.Fatalf("sweep wrong: removed %v", rep.RemovedDirs)
 	}
 }
 
 func TestPromoteCrossShareFreeSpaceRefusal(t *testing.T) {
 	r := newRig(t)
-	staging, _ := filepath.Rel(r.media, filepath.Join(r.d.Paths.Staging(), "anime", "X"))
+	staging, _ := filepath.Rel(r.media, filepath.Join(r.d.Paths.StagingRoot, "anime", "X"))
 	entries := threeEpisodes(t, r, staging)
 	r.free = 10
 	before := r.contents()
@@ -636,7 +636,7 @@ func TestPromoteNeverLosesAFile(t *testing.T) {
 			r := newRig(t)
 			from := pend
 			if across {
-				from, _ = filepath.Rel(r.media, filepath.Join(r.d.Paths.Staging(), "anime", "X"))
+				from, _ = filepath.Rel(r.media, filepath.Join(r.d.Paths.StagingRoot, "anime", "X"))
 			}
 			var entries []PromoteEntry
 			for i, ext := range videoExts {

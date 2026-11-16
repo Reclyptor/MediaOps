@@ -69,7 +69,10 @@ func NewRun(d Deps, p plan.Plan, runID string) (*Run, error) {
 		return nil, err
 	}
 	d = d.withDefaults()
-	staging := d.Paths.Staging()
+	staging, err := d.Paths.Staging()
+	if err != nil {
+		return nil, err
+	}
 	st := newState(d, runID, runstore.KindRip)
 	for i, e := range p.Discs {
 		st.Discs = append(st.Discs, runstore.Disc{

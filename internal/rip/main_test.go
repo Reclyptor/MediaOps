@@ -77,7 +77,11 @@ func fakeStatDev(path string) (uint64, error) {
 // drive list read from a file, and every program the fake binary.
 func roleDeps() Deps {
 	dir := os.Getenv(dirEnv)
-	cfg := paths.Config{MediaRoot: filepath.Join(dir, "media"), StatDev: fakeStatDev}
+	cfg := paths.Config{MediaRoot: filepath.Join(dir, "media"), StagingRoot: filepath.Join(dir, "staging"), StatDev: fakeStatDev}
+	ripsRoot, err := cfg.RipsRoot()
+	if err != nil {
+		panic(err)
+	}
 	leasePath := filepath.Join(dir, "lease")
 	return Deps{
 		Paths:  cfg,
@@ -94,7 +98,7 @@ func roleDeps() Deps {
 				return filepath.Join(dir, "tools", name), nil
 			},
 		},
-		Store:       &runstore.Store{Root: cfg.RipsRoot(), Live: leaseLiveness{path: leasePath}},
+		Store:       &runstore.Store{Root: ripsRoot, Live: leaseLiveness{path: leasePath}},
 		Clock:       systemClock{},
 		LeasePath:   leasePath,
 		SysBlock:    filepath.Join(dir, "sys", "block"),
@@ -255,9 +259,9 @@ func newProcRig(t *testing.T, serials ...string) *procRig {
 	}
 	dir := t.TempDir()
 	p := &procRig{t: t, dir: dir, sys: &fakeSys{root: filepath.Join(dir, "sys")}}
-	p.cfg = paths.Config{MediaRoot: filepath.Join(dir, "media"), StatDev: fakeStatDev}
-	p.store = &runstore.Store{Root: p.cfg.RipsRoot(), Live: leaseLiveness{path: p.leasePath()}}
-	for _, d := range []string{p.cfg.Staging(), p.sys.blockDir(), filepath.Join(dir, "tools"), filepath.Join(dir, "home")} {
+	p.cfg = paths.Config{MediaRoot: filepath.Join(dir, "media"), StagingRoot: filepath.Join(dir, "staging"), StatDev: fakeStatDev}
+	p.store = &runstore.Store{Root: mustRipsRoot(t, p.cfg), Live: leaseLiveness{path: p.leasePath()}}
+	for _, d := range []string{p.cfg.StagingRoot, p.sys.blockDir(), filepath.Join(dir, "tools"), filepath.Join(dir, "home")} {
 		mustMkdir(t, d)
 	}
 	for _, tool := range []string{"makemkvcon", "ffprobe", "mkvpropedit", "mkvmerge"} {
@@ -425,7 +429,7 @@ func (p *procRig) until(what string, cond func() bool) {
 
 // runDirs is the names under .rips.
 func (p *procRig) runDirs() []string {
-	entries, _ := os.ReadDir(p.cfg.RipsRoot())
+	entries, _ := os.ReadDir(mustRipsRoot(p.t, p.cfg))
 	var names []string
 	for _, e := range entries {
 		names = append(names, e.Name())

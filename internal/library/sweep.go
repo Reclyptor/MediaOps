@@ -18,13 +18,14 @@ import (
 //   - a file. It uses rmdir only, so a path that turns out to name a file is
 //     left alone.
 //
-// It returns the directories removed, and a warning for each directory it could
-// not remove for a reason other than not being empty.
-func (d Deps) sweep(sources []string) (removed, warnings []string) {
+// staging is the path of that tree. It returns the directories removed, and a
+// warning for each directory it could not remove for a reason other than not
+// being empty.
+func (d Deps) sweep(staging string, sources []string) (removed, warnings []string) {
 	for _, src := range sources {
 		dir := filepath.Dir(src)
 		bound := d.sweepBound(dir)
-		for bound != "" && strictlyWithin(bound, dir) && dir != d.Paths.Staging() {
+		for bound != "" && strictlyWithin(bound, dir) && dir != staging {
 			err := rmdirEmpty(dir)
 			switch {
 			case err == nil:

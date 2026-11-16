@@ -16,11 +16,11 @@ import (
 
 const (
 	usageSeries     = "usage: mkv-audit series DIR... | --list FILE [--workers N]"
-	usageFilms      = "usage: mkv-audit films [ROOT...] [--min-minutes 60]"
-	usageBlindspot  = "usage: mkv-audit blindspot [ROOT...]"
-	usageSweep      = "usage: mkv-audit sweep MANIFEST [ROOT...] [--min-minutes 60]"
+	usageFilms      = "usage: mkv-audit films ROOT... [--min-minutes 60]"
+	usageBlindspot  = "usage: mkv-audit blindspot ROOT..."
+	usageSweep      = "usage: mkv-audit sweep MANIFEST ROOT... [--min-minutes 60]"
 	usagePostcheck  = "usage: mkv-audit postcheck MANIFEST --before INVENTORY.json [--workers N]"
-	usageGeneral    = "usage: mkv-audit series DIR... | --list FILE | films [ROOT...] | blindspot [ROOT...] | sweep MANIFEST [ROOT...] | postcheck MANIFEST --before INVENTORY.json | --version"
+	usageGeneral    = "usage: mkv-audit series DIR... | --list FILE | films ROOT... | blindspot ROOT... | sweep MANIFEST ROOT... | postcheck MANIFEST --before INVENTORY.json | --version"
 	maxListFileSize = 8 << 20
 )
 
@@ -29,7 +29,7 @@ const (
 // refusal prints only the FATAL line.
 func Command(ctx context.Context, d Deps, args []string, streams cli.IO) error {
 	if len(args) == 0 {
-		return cli.Usage(errors.New(usageGeneral))
+		return usageError(usageGeneral)
 	}
 	switch args[0] {
 	case "series":
@@ -37,13 +37,20 @@ func Command(ctx context.Context, d Deps, args []string, streams cli.IO) error {
 	case "films":
 		return filmsCommand(ctx, d, args[1:], streams)
 	case "blindspot":
-		return blindspotCommand(d, args[1:], streams)
+		return blindspotCommand(args[1:], streams)
 	case "sweep":
 		return sweepCommand(ctx, d, args[1:], streams)
 	case "postcheck":
 		return postcheckCommand(ctx, d, args[1:], streams)
 	}
-	return cli.Usage(errors.New(usageGeneral))
+	return usageError(usageGeneral)
+}
+
+// usageError is a usage line as an exit-2 error. The line is a parameter so
+// that a usage ending in "ROOT..." is not mistaken for an error message ending
+// in punctuation.
+func usageError(usage string) error {
+	return cli.Usage(errors.New(usage))
 }
 
 // finish prints the report and turns an unclean one into exit 1.
@@ -84,14 +91,6 @@ func existingDirs(args []string) ([]string, error) {
 		out[i] = abs
 	}
 	return out, nil
-}
-
-// roots is ROOT... as given, or the pipeline's anime and ecchi categories.
-func (d Deps) roots(args []string) ([]string, error) {
-	if len(args) == 0 {
-		args = []string{filepath.Join(d.Paths.Share(), "anime"), filepath.Join(d.Paths.Share(), "ecchi")}
-	}
-	return existingDirs(args)
 }
 
 // listedDirs reads --list's file: one directory per line, blank lines ignored.
@@ -140,7 +139,7 @@ func seriesCommand(ctx context.Context, d Deps, args []string, streams cli.IO) e
 	fs.IntVar(&workers, "workers", DefaultWorkers, "")
 	rest, err := cli.ParseFlags(fs, args)
 	if err != nil || (len(rest) == 0 && list == "") {
-		return cli.Usage(errors.New(usageSeries))
+		return usageError(usageSeries)
 	}
 	if err := checkWorkers(workers); err != nil {
 		return err
@@ -175,10 +174,10 @@ func filmsCommand(ctx context.Context, d Deps, args []string, streams cli.IO) er
 	fs := cli.NewFlagSet("mkv-audit")
 	fs.Float64Var(&minutes, "min-minutes", DefaultMinMinutes, "")
 	rest, err := cli.ParseFlags(fs, args)
-	if err != nil {
-		return cli.Usage(errors.New(usageFilms))
+	if err != nil || len(rest) == 0 {
+		return usageError(usageFilms)
 	}
-	roots, err := d.roots(rest)
+	roots, err := existingDirs(rest)
 	if err != nil {
 		return err
 	}
@@ -189,13 +188,13 @@ func filmsCommand(ctx context.Context, d Deps, args []string, streams cli.IO) er
 	return finish(streams, rep, rep.Clean)
 }
 
-func blindspotCommand(d Deps, args []string, streams cli.IO) error {
+func blindspotCommand(args []string, streams cli.IO) error {
 	fs := cli.NewFlagSet("mkv-audit")
 	rest, err := cli.ParseFlags(fs, args)
-	if err != nil {
-		return cli.Usage(errors.New(usageBlindspot))
+	if err != nil || len(rest) == 0 {
+		return usageError(usageBlindspot)
 	}
-	roots, err := d.roots(rest)
+	roots, err := existingDirs(rest)
 	if err != nil {
 		return err
 	}
@@ -211,14 +210,14 @@ func sweepCommand(ctx context.Context, d Deps, args []string, streams cli.IO) er
 	fs := cli.NewFlagSet("mkv-audit")
 	fs.Float64Var(&minutes, "min-minutes", DefaultMinMinutes, "")
 	rest, err := cli.ParseFlags(fs, args)
-	if err != nil || len(rest) == 0 {
-		return cli.Usage(errors.New(usageSweep))
+	if err != nil || len(rest) < 2 {
+		return usageError(usageSweep)
 	}
 	m, schema, err := manifest.Load(rest[0])
 	if err != nil {
 		return err
 	}
-	roots, err := d.roots(rest[1:])
+	roots, err := existingDirs(rest[1:])
 	if err != nil {
 		return err
 	}
@@ -239,7 +238,7 @@ func postcheckCommand(ctx context.Context, d Deps, args []string, streams cli.IO
 	fs.IntVar(&workers, "workers", DefaultWorkers, "")
 	rest, err := cli.ParseFlags(fs, args)
 	if err != nil || len(rest) != 1 || beforePath == "" {
-		return cli.Usage(errors.New(usagePostcheck))
+		return usageError(usagePostcheck)
 	}
 	if err := checkWorkers(workers); err != nil {
 		return err
