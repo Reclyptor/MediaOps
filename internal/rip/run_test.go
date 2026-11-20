@@ -336,8 +336,11 @@ func TestHealthDmesgMirrored(t *testing.T) {
 	}
 }
 
+// The timeout bounds disc 1's scan too, and that scan costs real time: 10 to
+// 45 ms here under -race, and more than 200 ms (100 s at scale 500) once on a
+// loaded CI runner. Scale 50 gives it 2 s.
 func TestScanTimeout(t *testing.T) {
-	g := newRig(t, 500, serials(2)...)
+	g := newRig(t, 50, serials(2)...)
 	g.runner.configure("/dev/sr0", func(d *fakeDisc) { d.HangScan = true })
 	p := testPlan(serials(2)...)
 	p.ScanTimeoutSeconds = 100
