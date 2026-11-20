@@ -903,11 +903,12 @@ like `audio_defualt` simply did nothing.
 | `title` | `path`, `title` | none | segment title |
 | `flags` | `path`, `audio_default`, `sub_default` | none | absolute ffprobe stream indexes; `sub_default` must be present and may be `null`, meaning no default subtitle. `names` is refused: track names are never changed |
 | `audio_lang` | `path`, `langs` | none | `{"<abs index>": "<ISO 639-2, three lowercase letters>"}`, non-empty; `names` is refused |
+| `video_lang` | `path`, `langs` | none | as `audio_lang`, but every index must be a video track; cover art (an attached picture) is not one |
 | `rmdir_if_empty` | `path` | none | never `MEDIA_ROOT`, a share (`MEDIA_ROOT/<x>`) or the staging tree |
 
 `title` values are non-empty. `size` is a non-negative byte count that `check` compares
 with the source as it will be at that point in the run; the generators write it. Targets of
-`title`, `flags`, `audio_lang`, `rename` with a `title`, and `remux.dst` must end in
+`title`, `flags`, `audio_lang`, `video_lang`, `rename` with a `title`, and `remux.dst` must end in
 `.mkv`, `.mka` or `.mks`.
 
 ### `check`
@@ -967,6 +968,7 @@ library's does.
 | `title` | `SetTitle` | `mkvmerge -J` |
 | `flags` | `SetDefaultFlags` | every audio and sub disposition as wanted, exactly one default audio, at most one default sub, every track name unchanged |
 | `audio_lang` | `SetAudioLanguages`, including the Matroska `LANGUAGE` tag rewrite the Python did, because Plex reads the tag over the Language element | every audio stream's language as wanted, titles and defaults unchanged; the rewritten tags as wanted |
+| `video_lang` | `SetVideoLanguages`, the same edit and `LANGUAGE` tag rewrite on `track:vN` | every video stream's language as wanted, titles and defaults unchanged; the rewritten tags as wanted |
 | `rmdir_if_empty` | `RemoveDirIfEmpty` | a missing or non-empty directory is `skipped` with a detail, not a failure |
 
 mkvpropedit addresses tracks as `track:aN` and `track:sN`. The absolute ffprobe index maps
@@ -1013,7 +1015,7 @@ executor see one picture:
 | file moves | `settled`, journaled `done`; a `title` is still applied | redone | conflict: a finding naming both paths, never resolved by deleting |
 | directory moves | `settled` when dst's tree equals the recorded one | redone | resumed: the remaining files move; a file present on both sides is a conflict |
 | `remux` | `settled` when `src` is gone and `dst` and `archive_dst` exist | redone, the partial discarded | `dst` and `src` present, `archive_dst` absent: re-verify, title, archive. Any other mix is a conflict |
-| `title`, `flags`, `audio_lang`, `rmdir_if_empty` | redone, being idempotent | redone | redone |
+| `title`, `flags`, `audio_lang`, `video_lang`, `rmdir_if_empty` | redone, being idempotent | redone | redone |
 
 ### The generators
 
@@ -1037,7 +1039,7 @@ and write nothing; review the output, then `exec` it.
 
 - Dry run is the default and `--go` acts. The Python acted at once.
 - `check` is part of every `exec`, so it cannot be skipped.
-- Unknown keys are findings; `names` on `flags` and `audio_lang` is refused.
+- Unknown keys are findings; `names` on `flags`, `audio_lang` and `video_lang` is refused.
 - Archive destinations must lie under `ARCHIVE_ROOT`.
 - Probes use `-of json`. The Python's `frames_and_packets` used `csv=p=0`, the exact
   pattern the skill warns against.
@@ -1059,7 +1061,7 @@ Penguindrum's `rename-manifest.json`, a coherent subset of `film-plan-v2.json` c
 translated into ops. Tests build each fixture's tree in a temp dir and run `check` and
 `exec --go` against it with a fake `proc.Runner` that keeps each file's metadata in the
 file's own bytes, so moves carry it. A test tagged `integration` runs `remux`, `title`,
-`flags` and `audio_lang` against real mkvtoolnix and ffmpeg.
+`flags`, `audio_lang` and `video_lang` against real mkvtoolnix and ffmpeg.
 
 ## 13. Play-All analysis, splitting and audits
 

@@ -265,7 +265,7 @@ so the first run after a pod roll pays a few seconds and later ones are sub-seco
 ## Running a manifest
 
 `mkv-manifest` takes a manifest of ops (`rename`, `archive_file`, `remux`, `title`, `flags`,
-`audio_lang`, `rmdir_if_empty`, and the rest in [`SPEC.md` §12](SPEC.md#12-manifest-runs-mkv-manifest))
+`audio_lang`, `video_lang`, `rmdir_if_empty`, and the rest in [`SPEC.md` §12](SPEC.md#12-manifest-runs-mkv-manifest))
 with absolute paths: `MEDIA_ROOT` for everything but archive destinations, which must lie
 under `ARCHIVE_ROOT`. Write it into the job's plan dir on the NAS, because the journal is
 written beside it and that is what lets a rerun resume after a pod roll. Run it in the
