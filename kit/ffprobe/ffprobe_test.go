@@ -111,6 +111,19 @@ func TestStreams(t *testing.T) {
 	}
 }
 
+func TestStreamsAttachedPic(t *testing.T) {
+	r := &fakeRunner{res: ok(`{"streams": [
+		{"index": 0, "codec_type": "video", "disposition": {"default": 1, "attached_pic": 0}},
+		{"index": 1, "codec_type": "video", "disposition": {"default": 0, "attached_pic": 1}}]}`)}
+	got, err := Streams(context.Background(), r, "/x/a.mkv")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got[0].AttachedPic || !got[1].AttachedPic {
+		t.Fatalf("attached pictures = %v, %v, want false, true", got[0].AttachedPic, got[1].AttachedPic)
+	}
+}
+
 func TestStreamsSampleAspect(t *testing.T) {
 	for _, tc := range []struct {
 		raw  string

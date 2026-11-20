@@ -152,7 +152,7 @@ func (r *replay) run(schema []Finding) {
 			r.fileMove(op, a)
 		case KindRenameDir, KindMoveDir, KindArchiveDir:
 			r.dirMove(op, a)
-		case KindTitle, KindFlags, KindAudioLang:
+		case KindTitle, KindFlags, KindAudioLang, KindVideoLang:
 			if !r.ov.isFile(op.Path) {
 				r.bad(op.Path, "%s target is not a file at this point", op.Kind)
 			}

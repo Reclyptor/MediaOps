@@ -170,11 +170,11 @@ func (e *xEnv) cancelDuring(op Op) context.Context {
 	return ctx
 }
 
-// multiOps seeds a tree and returns ten ops, nine of which touch their source
+// multiOps seeds a tree and returns eleven ops, ten of which touch their source
 // or target in a way cancelDuring can see.
 func (e *xEnv) multiOps() []Op {
 	a, b, c := e.seed("nas/show/a.mkv"), e.seed("nas/show/b.mkv"), e.seed("nas/show/c.avi")
-	d, f, g := e.seed("nas/show/d.mkv"), e.seed("nas/show/e.mkv"), e.seed("nas/show/f.mkv")
+	d, f, g, h := e.seed("nas/show/d.mkv"), e.seed("nas/show/e.mkv"), e.seed("nas/show/f.mkv"), e.seed("nas/show/g.mkv")
 	for _, dir := range []string{"one", "two", "three"} {
 		e.seed("nas/dirs/" + dir + "/x.mkv")
 		e.seed("nas/dirs/" + dir + "/sub/y.mkv")
@@ -189,6 +189,7 @@ func (e *xEnv) multiOps() []Op {
 		{Kind: KindRenameDir, Src: e.path("nas/dirs/one"), Dst: e.path("nas/moved/one")},
 		{Kind: KindMoveDir, Src: e.path("nas/dirs/two"), Dst: e.path("nas2/moved/two")},
 		{Kind: KindAudioLang, Path: g, Langs: map[int]string{1: "fre", 2: "ger"}},
+		{Kind: KindVideoLang, Path: h, Langs: map[int]string{0: "jpn"}},
 		{Kind: KindArchiveDir, Src: e.path("nas/dirs/three"), Dst: filepath.Join(e.archive, "dirs/three")},
 		{Kind: KindRmdirIfEmpty, Path: e.path("nas/empty")},
 	}
@@ -668,6 +669,7 @@ func TestResumeInDoubtIdempotentKinds(t *testing.T) {
 	title := file(Op{Kind: KindTitle, Title: "New"})
 	flags := file(Op{Kind: KindFlags, AudioDefault: 2, SubDefault: intp(4)})
 	lang := file(Op{Kind: KindAudioLang, Langs: map[int]string{1: "fre"}})
+	videoLang := file(Op{Kind: KindVideoLang, Langs: map[int]string{0: "jpn"}})
 	rmdir := func(e *xEnv) Op { return Op{Kind: KindRmdirIfEmpty, Path: e.mkdir("nas/empty")} }
 
 	hasTitle := func(e *xEnv, op Op, _ map[string]string) {
@@ -684,6 +686,11 @@ func TestResumeInDoubtIdempotentKinds(t *testing.T) {
 	hasLang := func(e *xEnv, op Op, _ map[string]string) {
 		if got := media(e.t, op.Path).Streams[1].Lang; got != "fre" {
 			e.t.Errorf("language = %q", got)
+		}
+	}
+	hasVideoLang := func(e *xEnv, op Op, _ map[string]string) {
+		if got := media(e.t, op.Path).Streams[0].Lang; got != "jpn" {
+			e.t.Errorf("video language = %q", got)
 		}
 	}
 	dirGone := func(e *xEnv, op Op, _ map[string]string) {
@@ -703,6 +710,9 @@ func TestResumeInDoubtIdempotentKinds(t *testing.T) {
 		{name: "language not yet applied", setup: lang, outcome: Redo, status: StatusDone, verify: hasLang},
 		{name: "language already applied", setup: lang, outcome: Redo, status: StatusDone, verify: hasLang,
 			arrange: rewrite(func(m *fakeMedia) { m.Streams[1].Lang = "fre" })},
+		{name: "video language not yet applied", setup: videoLang, outcome: Redo, status: StatusDone, verify: hasVideoLang},
+		{name: "video language already applied", setup: videoLang, outcome: Redo, status: StatusDone, verify: hasVideoLang,
+			arrange: rewrite(func(m *fakeMedia) { m.Streams[0].Lang = "jpn" })},
 		{name: "rmdir not yet done", setup: rmdir, outcome: Redo, status: StatusDone, verify: dirGone},
 		{name: "rmdir already done", setup: rmdir, outcome: Redo, status: StatusSkipped, detail: "already absent", verify: dirGone,
 			arrange: func(e *xEnv, op Op) {

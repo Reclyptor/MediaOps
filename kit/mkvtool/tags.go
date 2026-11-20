@@ -137,13 +137,13 @@ func tagsOf(root *node, uid string) []*node {
 	return mine
 }
 
-// retagLanguage rewrites the Matroska LANGUAGE track tag of the audio track
-// numbered ordinal (UID uid) to lang. ffmpeg-based readers, Plex among them,
+// retagLanguage rewrites the Matroska LANGUAGE track tag of the track of type
+// tt numbered ordinal (UID uid) to lang. ffmpeg-based readers, Plex among them,
 // let that tag override the track's Language element, so a track that carries
 // one would keep showing its old language. A track without such a tag is left
 // alone. Everything else the track's tags carry is written back unchanged and
 // read back by name and value.
-func retagLanguage(ctx context.Context, r proc.Runner, file string, ordinal int, uid, lang string) error {
+func retagLanguage(ctx context.Context, r proc.Runner, file string, tt trackType, ordinal int, uid, lang string) error {
 	root, err := extractTags(ctx, r, file)
 	if err != nil {
 		return err
@@ -178,7 +178,7 @@ func retagLanguage(ctx context.Context, r proc.Runner, file string, ordinal int,
 	if err != nil {
 		return fmt.Errorf("writing the tags of track %s in %s: %w", uid, file, err)
 	}
-	if err := writeTags(ctx, r, file, ordinal, append([]byte(`<?xml version="1.0"?>`), doc...)); err != nil {
+	if err := writeTags(ctx, r, file, tt, ordinal, append([]byte(`<?xml version="1.0"?>`), doc...)); err != nil {
 		return err
 	}
 
@@ -187,7 +187,7 @@ func retagLanguage(ctx context.Context, r proc.Runner, file string, ordinal int,
 		return err
 	}
 	if got := pairs(tagsOf(back, uid)); !slices.Equal(got, want) {
-		return fmt.Errorf("the tags of audio track %d of %s read back as %v after writing %v", ordinal, file, got, want)
+		return fmt.Errorf("the tags of %s track %d of %s read back as %v after writing %v", tt.name, ordinal, file, got, want)
 	}
 	return nil
 }
@@ -217,9 +217,9 @@ func derefNodes(in []*node) []node {
 	return out
 }
 
-// writeTags hands doc to mkvpropedit as the tags of audio track ordinal. The
+// writeTags hands doc to mkvpropedit as the tags of track ordinal of type tt. The
 // temporary file is removed whatever happens.
-func writeTags(ctx context.Context, r proc.Runner, file string, ordinal int, doc []byte) (err error) {
+func writeTags(ctx context.Context, r proc.Runner, file string, tt trackType, ordinal int, doc []byte) (err error) {
 	f, err := os.CreateTemp("", "mkvtool-tags-*.xml")
 	if err != nil {
 		return fmt.Errorf("creating a temporary tags file: %w", err)
@@ -236,5 +236,5 @@ func writeTags(ctx context.Context, r proc.Runner, file string, ordinal int, doc
 	if werr != nil {
 		return fmt.Errorf("writing %s: %w", f.Name(), werr)
 	}
-	return runEdit(ctx, r, file, "mkvpropedit", file, "--tags", fmt.Sprintf("track:a%d:%s", ordinal, f.Name()))
+	return runEdit(ctx, r, file, "mkvpropedit", file, "--tags", fmt.Sprintf("%s:%s", tt.selector(ordinal), f.Name()))
 }

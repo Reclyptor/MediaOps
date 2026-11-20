@@ -100,7 +100,7 @@ func (f *fixtureRun) expectedFiles() map[string]fixtureFile {
 			file := files[op.Path]
 			file.flags = &op
 			files[op.Path] = file
-		case KindAudioLang:
+		case KindAudioLang, KindVideoLang:
 			file := files[op.Path]
 			file.langs = op.Langs
 			files[op.Path] = file
@@ -263,7 +263,7 @@ func halfwayOp(f *fixtureRun) (Op, string) {
 	last := len(f.m.Ops) - 1
 	for _, op := range f.m.Ops[len(f.m.Ops)/2 : last] {
 		switch {
-		case op.Kind == KindTitle || op.Kind == KindFlags || op.Kind == KindAudioLang:
+		case op.Kind == KindTitle || op.Kind == KindFlags || op.IsLang():
 			return op, op.Path
 		case op.Kind == KindRename && op.Title != "":
 			return op, op.Dst

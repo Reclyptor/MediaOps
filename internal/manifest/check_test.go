@@ -80,6 +80,7 @@ func TestCheckFindingKinds(t *testing.T) {
 		{"dir dst inside src", Op{Kind: KindMoveDir, Src: r.path("nas/a/dir"), Dst: r.path("nas/a/dir/in/side")}, "inside its own src"},
 		{"title target missing", Op{Kind: KindTitle, Path: r.path("nas/a/none.mkv"), Title: "T"}, "target is not a file"},
 		{"flags target is a dir", Op{Kind: KindFlags, Path: r.path("nas/a/dir.mkv"), AudioDefault: 1}, "target is not a file"},
+		{"video_lang target missing", Op{Kind: KindVideoLang, Path: r.path("nas/a/none.mkv"), Langs: map[int]string{0: "jpn"}}, "target is not a file"},
 		{"audio_lang target missing", Op{Kind: KindAudioLang, Path: r.path("nas/a/none.mkv"), Langs: map[int]string{1: "jpn"}}, "target is not a file"},
 		{"remux archive_dst exists", Op{Kind: KindRemux, Src: other, Dst: r.path("nas/a/r.mkv"), ArchiveDst: r.archive + "/x", Title: "T"}, "archive_dst already exists"},
 	}

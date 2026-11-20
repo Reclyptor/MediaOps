@@ -229,3 +229,118 @@ func TestIntegration(t *testing.T) {
 		}
 	})
 }
+
+// buildVideoSample writes a one second MKV whose video track is eng, titled
+// and default, next to a titled audio track, with a cover.jpg attachment that
+// ffprobe lists as a second video stream. With tagged the video track also
+// carries a Matroska LANGUAGE tag.
+func buildVideoSample(t *testing.T, tagged bool) string {
+	t.Helper()
+	dir := t.TempDir()
+	cover := filepath.Join(dir, "cover.jpg")
+	synth(t, "ffmpeg", "-nostdin", "-v", "error", "-f", "lavfi", "-i", "testsrc=size=64x48:rate=1", "-frames:v", "1", cover)
+
+	mkv := filepath.Join(dir, "video.mkv")
+	synth(t, "ffmpeg", "-nostdin", "-v", "error",
+		"-f", "lavfi", "-i", "testsrc=duration=1:size=160x120:rate=24",
+		"-f", "lavfi", "-i", "sine=frequency=440:duration=1",
+		"-map", "0:v", "-map", "1:a",
+		"-c:v", "libx264", "-preset", "ultrafast", "-pix_fmt", "yuv420p", "-c:a", "aac",
+		"-metadata:s:v:0", "title=Main", "-metadata:s:v:0", "language=eng",
+		"-metadata:s:a:0", "title=Japanese 2.0", "-metadata:s:a:0", "language=jpn",
+		"-disposition:v:0", "default", "-disposition:a:0", "default",
+		"-attach", cover, "-metadata:s:t", "mimetype=image/jpeg",
+		mkv)
+	if tagged {
+		tags := filepath.Join(dir, "tags.xml")
+		doc := `<?xml version="1.0"?><Tags><Tag><Targets/>` +
+			`<Simple><Name>LANGUAGE</Name><String>eng</String></Simple>` +
+			`<Simple><Name>ENCODER</Name><String>libfoo</String></Simple></Tag></Tags>`
+		if err := os.WriteFile(tags, []byte(doc), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		synth(t, "mkvpropedit", mkv, "--tags", "track:v1:"+tags)
+	}
+	return mkv
+}
+
+func TestIntegrationSetVideoLanguages(t *testing.T) {
+	ctx := context.Background()
+	for _, tagged := range []bool{false, true} {
+		name := "without a LANGUAGE tag"
+		if tagged {
+			name = "with a LANGUAGE tag"
+		}
+		t.Run(name, func(t *testing.T) {
+			mkv := buildVideoSample(t, tagged)
+			before, err := ffprobe.Streams(ctx, realRunner, mkv)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(before) != 3 || before[0].CodecType != "video" || before[0].Tags["language"] != "eng" {
+				t.Fatalf("sample streams = %+v", before)
+			}
+			if !before[2].AttachedPic {
+				t.Fatalf("the cover is not an attached picture: %+v", before[2])
+			}
+
+			if err := SetVideoLanguages(ctx, realRunner, mkv, map[int]string{0: "jpn"}); err != nil {
+				t.Fatal(err)
+			}
+			after, err := ffprobe.Streams(ctx, realRunner, mkv)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := after[0].Tags["language"]; got != "jpn" {
+				t.Errorf("video language = %q, want jpn", got)
+			}
+			for i := range before {
+				if after[i].Tags["title"] != before[i].Tags["title"] || after[i].Default != before[i].Default {
+					t.Errorf("stream %d title or default changed: %+v -> %+v", i, before[i], after[i])
+				}
+			}
+			if after[1].Tags["language"] != "jpn" || after[0].Tags["title"] != "Main" || !after[0].Default {
+				t.Errorf("an untouched property changed: %+v", after)
+			}
+
+			root, err := extractTags(ctx, realRunner, mkv)
+			if err != nil {
+				t.Fatal(err)
+			}
+			id, err := Identify(ctx, realRunner, mkv)
+			if err != nil {
+				t.Fatal(err)
+			}
+			got := pairs(tagsOf(root, id.Tracks[0].UID))
+			if tagged {
+				if want := []tagPair{{"ENCODER", "libfoo"}, {"LANGUAGE", "jpn"}}; !reflect.DeepEqual(got, want) {
+					t.Errorf("video track tag pairs = %v, want %v", got, want)
+				}
+			} else if hasLanguageTag(tagsOf(root, id.Tracks[0].UID)) {
+				t.Errorf("a LANGUAGE tag appeared on a track that had none: %v", got)
+			}
+		})
+	}
+
+	t.Run("refuses an audio index", func(t *testing.T) {
+		mkv := buildVideoSample(t, true)
+		was, err := os.ReadFile(mkv)
+		if err != nil {
+			t.Fatal(err)
+		}
+		err = SetVideoLanguages(ctx, realRunner, mkv, map[int]string{0: "jpn", 1: "eng"})
+		if err == nil || !strings.Contains(err.Error(), "not a video stream") {
+			t.Fatalf("err = %v, want a refusal", err)
+		}
+		if now, err := os.ReadFile(mkv); err != nil || !reflect.DeepEqual(now, was) {
+			t.Fatalf("the file changed despite the refusal (read error %v)", err)
+		}
+	})
+
+	t.Run("refuses the cover art", func(t *testing.T) {
+		mkv := buildVideoSample(t, false)
+		if err := SetVideoLanguages(ctx, realRunner, mkv, map[int]string{2: "jpn"}); err == nil || !strings.Contains(err.Error(), "not a video stream") {
+			t.Fatalf("err = %v, want a refusal", err)
+		}
+	})
+}

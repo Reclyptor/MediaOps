@@ -20,7 +20,7 @@ func Assess(op Op, st BeginState) Assessment {
 		return assessDirMove(op, st)
 	case KindRemux:
 		return assessRemux(op)
-	case KindTitle, KindFlags, KindAudioLang, KindRmdirIfEmpty:
+	case KindTitle, KindFlags, KindAudioLang, KindVideoLang, KindRmdirIfEmpty:
 		return Assessment{Redo, fmt.Sprintf("%s is idempotent, so it runs again whatever state the tree is in", op.Kind)}
 	}
 	return conflictf("unknown op kind %q", op.Kind)

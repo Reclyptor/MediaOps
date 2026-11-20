@@ -42,6 +42,7 @@ func TestSchemaValidOpsHaveNoFindings(t *testing.T) {
 		`{"kind":"flags","path":"/a/x.mkv","audio_default":1,"sub_default":3}`,
 		`{"kind":"flags","path":"/a/x.mkv","audio_default":1,"sub_default":null}`,
 		`{"kind":"audio_lang","path":"/a/x.mks","langs":{"1":"jpn","2":"eng"}}`,
+		`{"kind":"video_lang","path":"/a/x.mkv","langs":{"0":"jpn"}}`,
 		`{"kind":"rmdir_if_empty","path":"/a/x"}`,
 	}
 	for _, op := range ops {
@@ -72,13 +73,21 @@ func TestSchemaFieldRules(t *testing.T) {
 		{"flags string sub", `{"kind":"flags","path":"/a/x.mkv","audio_default":1,"sub_default":"3"}`, "sub_default"},
 		{"flags names", `{"kind":"flags","path":"/a/x.mkv","audio_default":1,"sub_default":null,"names":{}}`, "track names are never changed"},
 		{"audio_lang names", `{"kind":"audio_lang","path":"/a/x.mkv","langs":{"1":"jpn"},"names":{}}`, "track names are never changed"},
+		{"video_lang names", `{"kind":"video_lang","path":"/a/x.mkv","langs":{"1":"jpn"},"names":{}}`, "track names are never changed"},
 		{"langs empty", `{"kind":"audio_lang","path":"/a/x.mkv","langs":{}}`, "must not be empty"},
+		{"video langs empty", `{"kind":"video_lang","path":"/a/x.mkv","langs":{}}`, "must not be empty"},
 		{"langs not object", `{"kind":"audio_lang","path":"/a/x.mkv","langs":["jpn"]}`, "object"},
+		{"video langs not object", `{"kind":"video_lang","path":"/a/x.mkv","langs":["jpn"]}`, "object"},
 		{"langs bad key", `{"kind":"audio_lang","path":"/a/x.mkv","langs":{"a":"jpn"}}`, "not a stream index"},
+		{"video langs bad key", `{"kind":"video_lang","path":"/a/x.mkv","langs":{"a":"jpn"}}`, "not a stream index"},
 		{"langs padded key", `{"kind":"audio_lang","path":"/a/x.mkv","langs":{"01":"jpn"}}`, "not a stream index"},
+		{"video langs padded key", `{"kind":"video_lang","path":"/a/x.mkv","langs":{"01":"jpn"}}`, "not a stream index"},
 		{"langs upper", `{"kind":"audio_lang","path":"/a/x.mkv","langs":{"1":"JPN"}}`, "three lowercase letters"},
+		{"video langs upper", `{"kind":"video_lang","path":"/a/x.mkv","langs":{"1":"JPN"}}`, "three lowercase letters"},
 		{"langs two letters", `{"kind":"audio_lang","path":"/a/x.mkv","langs":{"1":"ja"}}`, "three lowercase letters"},
+		{"video langs two letters", `{"kind":"video_lang","path":"/a/x.mkv","langs":{"1":"ja"}}`, "three lowercase letters"},
 		{"langs non-string", `{"kind":"audio_lang","path":"/a/x.mkv","langs":{"1":5}}`, "three lowercase letters"},
+		{"video langs non-string", `{"kind":"video_lang","path":"/a/x.mkv","langs":{"1":5}}`, "three lowercase letters"},
 		{"unknown key typo", `{"kind":"flags","path":"/a/x.mkv","audio_defualt":1,"audio_default":1,"sub_default":null}`, `unknown field "audio_defualt"`},
 		{"extra is unknown", `{"kind":"rename","src":"/a","dst":"/b","extra":true}`, `unknown field "extra"`},
 		{"after_dir_rename is unknown", `{"kind":"rename","src":"/a","dst":"/b","after_dir_rename":true}`, `unknown field "after_dir_rename"`},
@@ -134,6 +143,10 @@ func TestSchemaOpFieldsAreParsed(t *testing.T) {
 		t.Fatalf("%+v", op)
 	}
 	m, _ = loadOne(t, `{"kind":"audio_lang","path":"/a/x.mkv","langs":{"3":"jpn","10":"eng"}}`)
+	if got := m.Ops[0].Langs; len(got) != 2 || got[3] != "jpn" || got[10] != "eng" {
+		t.Fatalf("%v", got)
+	}
+	m, _ = loadOne(t, `{"kind":"video_lang","path":"/a/x.mkv","langs":{"3":"jpn","10":"eng"}}`)
 	if got := m.Ops[0].Langs; len(got) != 2 || got[3] != "jpn" || got[10] != "eng" {
 		t.Fatalf("%v", got)
 	}
@@ -242,6 +255,7 @@ func TestOpMarshalRoundTrips(t *testing.T) {
 		{Kind: KindFlags, Path: "/a/y.mkv", AudioDefault: 1},
 		{Kind: KindFlags, Path: "/a/y.mkv", AudioDefault: 1, SubDefault: intp(3)},
 		{Kind: KindAudioLang, Path: "/a/y.mkv", Langs: map[int]string{2: "jpn"}},
+		{Kind: KindVideoLang, Path: "/a/y.mkv", Langs: map[int]string{0: "jpn"}},
 		{Kind: KindRemux, Src: "/a/x.mp4", Dst: "/a/x.mkv", ArchiveDst: "/b/x.mp4", Title: "T"},
 		{Kind: KindRmdirIfEmpty, Path: "/a"},
 	}

@@ -62,7 +62,10 @@ type Stream struct {
 	Channels      int
 	Width, Height int
 	Default       bool
-	Tags          map[string]string
+	// AttachedPic is set for a video stream that is cover art, which is an
+	// attachment in Matroska and no track.
+	AttachedPic bool
+	Tags        map[string]string
 	// TimeBase is the stream's time base as ffprobe prints it, such as "1/1000".
 	TimeBase string
 	// NALLengthSize is ffprobe's nal_length_size for AVCC and HVCC h264 and
@@ -153,7 +156,7 @@ func convertStreams(raws []rawStream, path string) ([]Stream, error) {
 		streams = append(streams, Stream{
 			Index: *raw.Index, CodecType: *raw.CodecType, CodecName: raw.CodecName,
 			Channels: raw.Channels, Width: raw.Width, Height: raw.Height,
-			Default: raw.Disposition["default"] == 1, Tags: tags,
+			Default: raw.Disposition["default"] == 1, AttachedPic: raw.Disposition["attached_pic"] == 1, Tags: tags,
 			TimeBase: raw.TimeBase, NALLengthSize: nal, SampleRate: rate, SampleAspect: sar,
 		})
 	}

@@ -298,7 +298,7 @@ func TestAssessRedoKinds(t *testing.T) {
 		"full":    func(t *testing.T, p string) { asFile(t, filepath.Join(p, "x"), 5) },
 		"symlink": func(t *testing.T, p string) { asLink(t, "nowhere", p) },
 	}
-	for _, kind := range []string{KindTitle, KindFlags, KindAudioLang, KindRmdirIfEmpty} {
+	for _, kind := range []string{KindTitle, KindFlags, KindAudioLang, KindVideoLang, KindRmdirIfEmpty} {
 		for name, mk := range states {
 			t.Run(kind+"/"+name, func(t *testing.T) {
 				root := t.TempDir()

@@ -35,6 +35,7 @@ const (
 	KindTitle        = "title"
 	KindFlags        = "flags"
 	KindAudioLang    = "audio_lang"
+	KindVideoLang    = "video_lang"
 	KindRmdirIfEmpty = "rmdir_if_empty"
 )
 
@@ -112,6 +113,17 @@ func (o Op) IsDirMove() bool {
 // remux (which also writes a new file at Dst).
 func (o Op) IsFileMove() bool {
 	return o.Kind == KindRename || o.Kind == KindArchiveFile || o.Kind == KindRemux
+}
+
+// IsLang reports whether the op sets track languages, audio or video.
+func (o Op) IsLang() bool { return o.Kind == KindAudioLang || o.Kind == KindVideoLang }
+
+// LangType is the stream type a language op addresses, as ffprobe names it.
+func (o Op) LangType() string {
+	if o.Kind == KindVideoLang {
+		return "video"
+	}
+	return "audio"
 }
 
 // IsArchive reports whether the op writes into ARCHIVE_ROOT.

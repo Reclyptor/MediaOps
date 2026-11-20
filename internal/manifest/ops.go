@@ -64,6 +64,8 @@ func (x *executor) perform(ctx context.Context, op Op, a Assessment, st BeginSta
 		s, err = step{status: StatusDone}, mkvtool.SetDefaultFlags(ctx, x.c.Runner, op.Path, op.AudioDefault, op.SubDefault)
 	case KindAudioLang:
 		s, err = step{status: StatusDone}, mkvtool.SetAudioLanguages(ctx, x.c.Runner, op.Path, op.Langs)
+	case KindVideoLang:
+		s, err = step{status: StatusDone}, mkvtool.SetVideoLanguages(ctx, x.c.Runner, op.Path, op.Langs)
 	case KindRmdirIfEmpty:
 		s, err = x.rmdir(op)
 	default:
@@ -134,7 +136,7 @@ func (x *executor) prepare(op Op) (BeginState, error) {
 			return BeginState{}, err
 		}
 		return BeginState{Tree: tree}, nil
-	case KindTitle, KindFlags, KindAudioLang:
+	case KindTitle, KindFlags, KindAudioLang, KindVideoLang:
 		if _, err := requireFile(op.Path, "target"); err != nil {
 			return BeginState{}, err
 		}

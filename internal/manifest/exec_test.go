@@ -24,6 +24,7 @@ func (e *xEnv) allKinds() (ops []Op, srcAvi string) {
 	titled := writeMedia(t, e.path("nas/show/d.mkv"))
 	flagged := writeMedia(t, e.path("nas/show/e.mkv"))
 	langed := writeMedia(t, e.path("nas/show/f.mkv"))
+	vlanged := writeMedia(t, e.path("nas/show/g.mkv"))
 	for _, dir := range []string{"nas/dirs/one", "nas/dirs/two", "nas/dirs/three"} {
 		writeMedia(t, e.path(dir+"/x.mkv"))
 		writeMedia(t, e.path(dir+"/sub/y.mkv"))
@@ -39,6 +40,7 @@ func (e *xEnv) allKinds() (ops []Op, srcAvi string) {
 		{Kind: KindTitle, Path: titled, Title: "Show D"},
 		{Kind: KindFlags, Path: flagged, AudioDefault: 2, SubDefault: intp(4)},
 		{Kind: KindAudioLang, Path: langed, Langs: map[int]string{1: "fre", 2: "ger"}},
+		{Kind: KindVideoLang, Path: vlanged, Langs: map[int]string{0: "jpn"}},
 		{Kind: KindRenameDir, Src: e.path("nas/dirs/one"), Dst: e.path("nas/moved/one")},
 		{Kind: KindMoveDir, Src: e.path("nas/dirs/two"), Dst: e.path("nas2/moved/two")},
 		{Kind: KindArchiveDir, Src: e.path("nas/dirs/three"), Dst: filepath.Join(e.archive, "dirs/three")},
@@ -66,18 +68,18 @@ func TestExecAppliesEveryKind(t *testing.T) {
 				t.Fatalf("exec: %v\n%+v", err, rep)
 			}
 
-			want := []string{"done", "done", "done", "done", "done", "done", "done", "done", "done", "done", "skipped"}
+			want := []string{"done", "done", "done", "done", "done", "done", "done", "done", "done", "done", "done", "skipped"}
 			if !eqStrings(statuses(rep), want) {
 				t.Fatalf("statuses = %v, want %v\n%+v", statuses(rep), want, rep.Results)
 			}
-			if rep.DryRun || rep.Applied != 11 || rep.AlreadyDone != 0 || rep.Error != "" || rep.FailedOp != nil {
+			if rep.DryRun || rep.Applied != 12 || rep.AlreadyDone != 0 || rep.Error != "" || rep.FailedOp != nil {
 				t.Fatalf("report = %+v", rep)
 			}
 			if rep.Journal != JournalPath(path) || !rep.Check.Clean {
 				t.Fatalf("journal %q, check %+v", rep.Journal, rep.Check)
 			}
-			if rep.Results[10].Detail != "not empty, left in place" {
-				t.Errorf("skipped detail = %q", rep.Results[10].Detail)
+			if rep.Results[11].Detail != "not empty, left in place" {
+				t.Errorf("skipped detail = %q", rep.Results[11].Detail)
 			}
 
 			// rename + title
@@ -107,6 +109,9 @@ func TestExecAppliesEveryKind(t *testing.T) {
 			if l.Streams[1].Lang != "fre" || l.Streams[2].Lang != "ger" || l.Streams[3].Lang != "eng" {
 				t.Errorf("languages = %+v", l.Streams)
 			}
+			if got := media(t, e.path("nas/show/g.mkv")).Streams[0].Lang; got != "jpn" {
+				t.Errorf("video language = %q", got)
+			}
 			for _, p := range []string{"nas/moved/one", "nas2/moved/two"} {
 				if !present(e.path(p+"/x.mkv")) || !present(e.path(p+"/sub/y.mkv")) {
 					t.Errorf("%s is missing its files", p)
@@ -124,11 +129,11 @@ func TestExecAppliesEveryKind(t *testing.T) {
 				t.Error("a non-empty rmdir target lost its file")
 			}
 
-			if got := journalEvents(t, path); got[0] != "start" || got[len(got)-1] != "finish" || len(got) != 2+2*11 {
+			if got := journalEvents(t, path); got[0] != "start" || got[len(got)-1] != "finish" || len(got) != 2+2*12 {
 				t.Errorf("journal = %v", got)
 			}
 			j, err := ReadJournal(mustLoad(t, path))
-			if err != nil || j.DoneCount() != 11 {
+			if err != nil || j.DoneCount() != 12 {
 				t.Errorf("journal done %d, %v", j.DoneCount(), err)
 			}
 			if rep.Bytes == 0 {
@@ -159,7 +164,7 @@ func TestExecRerunAfterCompletionDoesNothing(t *testing.T) {
 	if err != nil {
 		t.Fatalf("rerun: %v", err)
 	}
-	if rep.AlreadyDone != 11 || len(rep.Results) != 0 || rep.Applied != 0 || e.fake.total() != calls {
+	if rep.AlreadyDone != 12 || len(rep.Results) != 0 || rep.Applied != 0 || e.fake.total() != calls {
 		t.Fatalf("rerun did work: %+v, %d new calls", rep, e.fake.total()-calls)
 	}
 }
@@ -323,8 +328,10 @@ func TestExecEditReadBackMismatchFails(t *testing.T) {
 		{"title", func(f *fakeRunner) { f.ignoreTitle = true }, func(p string) Op { return Op{Kind: KindTitle, Path: p, Title: "New"} }, "reads back as"},
 		{"flags", func(f *fakeRunner) { f.ignoreFlags = true }, func(p string) Op { return Op{Kind: KindFlags, Path: p, AudioDefault: 2, SubDefault: intp(4)} }, "default flags"},
 		{"audio_lang", func(f *fakeRunner) { f.ignoreLang = true }, func(p string) Op { return Op{Kind: KindAudioLang, Path: p, Langs: map[int]string{1: "fre"}} }, "reads back as"},
+		{"video_lang", func(f *fakeRunner) { f.ignoreLang = true }, func(p string) Op { return Op{Kind: KindVideoLang, Path: p, Langs: map[int]string{0: "jpn"}} }, "reads back as"},
 		{"flags on a stream that is not audio", func(*fakeRunner) {}, func(p string) Op { return Op{Kind: KindFlags, Path: p, AudioDefault: 3} }, "not an audio stream"},
 		{"audio_lang on a stream that is not audio", func(*fakeRunner) {}, func(p string) Op { return Op{Kind: KindAudioLang, Path: p, Langs: map[int]string{0: "fre"}} }, "not an audio stream"},
+		{"video_lang on a stream that is not video", func(*fakeRunner) {}, func(p string) Op { return Op{Kind: KindVideoLang, Path: p, Langs: map[int]string{1: "jpn"}} }, "not a video stream"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -501,6 +508,10 @@ func TestExecRefusesWhenAPreconditionFailsAtExecTime(t *testing.T) {
 			p := writeMedia(t, e.path("nas/a.mkv"))
 			return []Op{anchor(e), {Kind: KindAudioLang, Path: p, Langs: map[int]string{1: "fre"}}}, func() { os.Remove(p) }
 		}, "is not a regular file"},
+		{"video_lang target vanishes", func(e *xEnv) ([]Op, func()) {
+			p := writeMedia(t, e.path("nas/a.mkv"))
+			return []Op{anchor(e), {Kind: KindVideoLang, Path: p, Langs: map[int]string{0: "jpn"}}}, func() { os.Remove(p) }
+		}, "is not a regular file"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -578,7 +589,7 @@ func TestExecDryRunTouchesNothing(t *testing.T) {
 	if err != nil {
 		t.Fatalf("dry run: %v", err)
 	}
-	if !rep.DryRun || rep.Applied != 0 || len(rep.Results) != 11 || rep.Error != "" || rep.Bytes != rep.Check.Bytes || rep.Bytes == 0 {
+	if !rep.DryRun || rep.Applied != 0 || len(rep.Results) != 12 || rep.Error != "" || rep.Bytes != rep.Check.Bytes || rep.Bytes == 0 {
 		t.Fatalf("report = %+v", rep)
 	}
 	for _, s := range statuses(rep) {

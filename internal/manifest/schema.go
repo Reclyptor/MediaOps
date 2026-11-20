@@ -27,6 +27,7 @@ var kindFields = map[string]fieldSet{
 	KindTitle:        {[]string{"path", "title"}, nil},
 	KindFlags:        {[]string{"path", "audio_default", "sub_default"}, nil},
 	KindAudioLang:    {[]string{"path", "langs"}, nil},
+	KindVideoLang:    {[]string{"path", "langs"}, nil},
 	KindRmdirIfEmpty: {[]string{"path"}, nil},
 }
 
@@ -89,7 +90,7 @@ func parseOp(n int, raw json.RawMessage) (Op, []Finding) {
 	for _, k := range sortedKeys(fields) {
 		switch {
 		case slices.Contains(allowed, k):
-		case k == "names" && (op.Kind == KindFlags || op.Kind == KindAudioLang):
+		case k == "names" && (op.Kind == KindFlags || op.IsLang()):
 			bad("", `"names" is refused: track names are never changed`)
 		default:
 			bad("", "unknown field %q for kind %s", k, op.Kind)
@@ -162,7 +163,7 @@ func parseOp(n int, raw json.RawMessage) (Op, []Finding) {
 				bad("", `"sub_default" must be a non-negative stream index or null`)
 			}
 		}
-	case KindAudioLang:
+	case KindAudioLang, KindVideoLang:
 		if raw, ok := fields["langs"]; ok {
 			op.Langs = parseLangs(raw, func(problem string) { bad("", "%s", problem) })
 		}
@@ -176,7 +177,7 @@ func parseOp(n int, raw json.RawMessage) (Op, []Finding) {
 // tool that edits it needs.
 func checkExtensions(op Op, bad func(path, format string, args ...any)) {
 	switch op.Kind {
-	case KindTitle, KindFlags, KindAudioLang:
+	case KindTitle, KindFlags, KindAudioLang, KindVideoLang:
 		if op.Path != "" && !isMatroska(op.Path) {
 			bad(op.Path, "%s edits Matroska tags, so the path must end .mkv, .mka or .mks", op.Kind)
 		}
@@ -271,7 +272,7 @@ func (o Op) MarshalJSON() ([]byte, error) {
 		if o.SubDefault != nil {
 			j.SubDefault = json.RawMessage(strconv.Itoa(*o.SubDefault))
 		}
-	case KindAudioLang:
+	case KindAudioLang, KindVideoLang:
 		j.Langs = make(map[string]string, len(o.Langs))
 		for idx, code := range o.Langs {
 			j.Langs[strconv.Itoa(idx)] = code

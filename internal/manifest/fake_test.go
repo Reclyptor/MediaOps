@@ -247,7 +247,7 @@ func (m fakeMedia) mkvmergeJSON() []byte {
 	return b
 }
 
-// propedit serves `mkvpropedit FILE --edit info|track:aN|track:sN --set k=v ...`.
+// propedit serves `mkvpropedit FILE --edit info|track:aN|track:vN|track:sN --set k=v ...`.
 func (f *fakeRunner) propedit(file string, args []string) (proc.Result, error) {
 	m, payload, err := readFakeMedia(file)
 	if err != nil {
@@ -289,7 +289,7 @@ func (f *fakeRunner) propedit(file string, args []string) (proc.Result, error) {
 }
 
 func (m *fakeMedia) track(spec string) *fakeStream {
-	typ := map[byte]string{'a': "audio", 's': "subtitle"}[spec[0]]
+	typ := map[byte]string{'a': "audio", 'v': "video", 's': "subtitle"}[spec[0]]
 	n, _ := strconv.Atoi(spec[1:])
 	for i := range m.Streams {
 		if m.Streams[i].Type == typ {

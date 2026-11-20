@@ -49,8 +49,9 @@ func checkFlags(streams []ffprobe.Stream, audio int, sub *int) []string {
 	return out
 }
 
-// checkLangs reads an audio_lang op back from the streams' language tags.
-func checkLangs(streams []ffprobe.Stream, want map[int]string) []string {
+// checkLangs reads an audio_lang or video_lang op back from the streams'
+// language tags. kind is the type the op addresses, audio or video.
+func checkLangs(streams []ffprobe.Stream, want map[int]string, kind string) []string {
 	idx := make([]int, 0, len(want))
 	for i := range want {
 		idx = append(idx, i)
@@ -62,10 +63,10 @@ func checkLangs(streams []ffprobe.Stream, want map[int]string) []string {
 		switch {
 		case !ok:
 			out = append(out, fmt.Sprintf("stream %d does not exist", i))
-		case s.CodecType != "audio":
-			out = append(out, fmt.Sprintf("stream %d is %s, not audio", i, s.CodecType))
+		case s.CodecType != kind:
+			out = append(out, fmt.Sprintf("stream %d is %s, not %s", i, s.CodecType, kind))
 		case s.Tags["language"] != want[i]:
-			out = append(out, fmt.Sprintf("audio stream %d is %q, the manifest says %q", i, s.Tags["language"], want[i]))
+			out = append(out, fmt.Sprintf("%s stream %d is %q, the manifest says %q", kind, i, s.Tags["language"], want[i]))
 		}
 	}
 	return out
@@ -80,7 +81,7 @@ func deref(s *string) string {
 
 // compareTracks lists how the tracks of a file now differ from its --before
 // record, default flags aside: index, type, codec, channels, language and
-// title. A language an audio_lang op was asked to set is the expected one.
+// title. A language an audio_lang or video_lang op was asked to set is the expected one.
 func compareTracks(before []inventory.Stream, after []ffprobe.Stream, relang map[int]string) []string {
 	if len(before) != len(after) {
 		return []string{fmt.Sprintf("%d tracks before, %d now", len(before), len(after))}
@@ -89,7 +90,7 @@ func compareTracks(before []inventory.Stream, after []ffprobe.Stream, relang map
 	for i, b := range before {
 		a := after[i]
 		lang := deref(b.Lang)
-		if want, ok := relang[b.Index]; ok && b.Type == "audio" {
+		if want, ok := relang[b.Index]; ok && (b.Type == "audio" || b.Type == "video") {
 			lang = want
 		}
 		for _, d := range []struct {

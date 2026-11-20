@@ -282,6 +282,52 @@ func TestPostcheckAudioLangReadBack(t *testing.T) {
 	})
 }
 
+func TestPostcheckVideoLangReadBack(t *testing.T) {
+	ops := func(r *pcRun, idx string) {
+		r.ops = []op{
+			{"kind": "rename", "src": r.src1, "dst": r.dst1},
+			{"kind": "rename", "src": r.src2, "dst": r.dst2},
+			{"kind": "video_lang", "path": r.dst2, "langs": map[string]string{idx: "jpn"}},
+		}
+		r.done = []int{1, 2, 3}
+	}
+	t.Run("reads back", func(t *testing.T) {
+		r := newRun(t)
+		ops(r, "0")
+		r.m1.Streams[0].Lang, r.m2.Streams[0].Lang = "jpn", "jpn"
+		r.before = []inventory.Record{
+			{Path: r.src1, Streams: inventoryStreams(r.m1)},
+			{Path: r.src2, Streams: func() []inventory.Stream {
+				s := inventoryStreams(r.m2)
+				eng := "eng"
+				s[0].Lang = &eng // the op sets jpn
+				return s
+			}()},
+		}
+		if code, rep := r.check(); code != 0 {
+			t.Fatalf("%v", rep.Findings)
+		}
+	})
+	t.Run("does not", func(t *testing.T) {
+		r := newRun(t)
+		ops(r, "0")
+		r.m2.Streams[0].Lang = "eng"
+		_, rep := r.check()
+		f := find(t, rep.Findings, "LANG-MISMATCH")
+		if f.Path != r.dst2 || !strings.Contains(f.Detail, `video stream 0 is "eng", the manifest says "jpn"`) {
+			t.Fatalf("%+v", f)
+		}
+	})
+	t.Run("not a video stream", func(t *testing.T) {
+		r := newRun(t)
+		ops(r, "1")
+		_, rep := r.check()
+		if !strings.Contains(find(t, rep.Findings, "LANG-MISMATCH").Detail, "stream 1 is audio, not video") {
+			t.Fatalf("%v", rep.Findings)
+		}
+	})
+}
+
 func TestPostcheckIntegrity(t *testing.T) {
 	t.Run("warnings", func(t *testing.T) {
 		r := newRun(t)

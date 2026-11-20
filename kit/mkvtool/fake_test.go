@@ -19,6 +19,9 @@ type fakeTrack struct {
 	title string
 	def   bool
 	uid   string
+	// attachedPic marks cover art: ffprobe lists it as a video stream, mkvmerge
+	// as no track.
+	attachedPic bool
 	// simples are the Simple tags of the track's Matroska tag, as XML nodes.
 	simples []node
 }
@@ -33,6 +36,8 @@ type fakeMkv struct {
 	tracks []*fakeTrack
 	// mkvExtraAudio makes mkvmerge list audio tracks ffprobe does not see.
 	mkvExtraAudio int
+	// mkvExtraVideo makes mkvmerge list video tracks ffprobe does not see.
+	mkvExtraVideo int
 
 	ignoreFlags, ignoreLang, ignoreTags bool
 	renameOnEdit                        bool
@@ -104,9 +109,13 @@ func (f *fakeMkv) ffprobe() []byte {
 		if t.def {
 			def = 1
 		}
+		pic := 0
+		if t.attachedPic {
+			pic = 1
+		}
 		streams = append(streams, map[string]any{
 			"index": i, "codec_type": t.typ, "codec_name": "x",
-			"disposition": map[string]int{"default": def}, "tags": tags,
+			"disposition": map[string]int{"default": def, "attached_pic": pic}, "tags": tags,
 		})
 	}
 	out, _ := json.Marshal(map[string]any{"streams": streams})
@@ -121,6 +130,9 @@ func (f *fakeMkv) mkvmerge() []byte {
 			id, typ, uid, name, lang, def))
 	}
 	for i, t := range f.tracks {
+		if t.attachedPic {
+			continue
+		}
 		typ := t.typ
 		if typ == "subtitle" {
 			typ = "subtitles"
@@ -129,6 +141,9 @@ func (f *fakeMkv) mkvmerge() []byte {
 	}
 	for i := 0; i < f.mkvExtraAudio; i++ {
 		add(len(f.tracks)+i, "audio", strconv.Itoa(9000+i), "", "und", false)
+	}
+	for i := 0; i < f.mkvExtraVideo; i++ {
+		add(len(f.tracks)+f.mkvExtraAudio+i, "video", strconv.Itoa(9100+i), "", "und", false)
 	}
 	return fmt.Appendf(nil, `{"container": {"properties": {"title": %q}}, "tracks": [%s]}`, f.title, strings.Join(tracks, ","))
 }
@@ -165,10 +180,10 @@ func (f *fakeMkv) anyTags() bool {
 }
 
 func (f *fakeMkv) track(spec string) *fakeTrack {
-	typ := map[byte]string{'a': "audio", 's': "subtitle"}[spec[0]]
+	typ := map[byte]string{'a': "audio", 'v': "video", 's': "subtitle"}[spec[0]]
 	n, _ := strconv.Atoi(spec[1:])
 	for _, t := range f.tracks {
-		if t.typ == typ {
+		if t.typ == typ && !t.attachedPic {
 			if n--; n == 0 {
 				return t
 			}

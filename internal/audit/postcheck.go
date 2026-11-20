@@ -80,7 +80,7 @@ func (l lineage) subject(i int) string {
 	switch {
 	case op.IsFileMove() || op.IsDirMove():
 		return l.final(op.Dst, i+1)
-	case op.Kind == manifest.KindTitle || op.Kind == manifest.KindFlags || op.Kind == manifest.KindAudioLang:
+	case op.Kind == manifest.KindTitle || op.Kind == manifest.KindFlags || op.IsLang():
 		return l.final(op.Path, i+1)
 	}
 	return ""
@@ -120,7 +120,7 @@ func (d Deps) Postcheck(ctx context.Context, m *manifest.Manifest, schema []mani
 	beforeBy := before.ByPath()
 
 	// Which files need ffprobe: video destinations, and every file a title,
-	// flags or audio_lang op addressed. Integrity runs on mkv ones only.
+	// flags, audio_lang or video_lang op addressed. Integrity runs on mkv ones only.
 	var probePaths, integrityPaths []string
 	langs := map[string]map[int]string{}
 	for i, op := range m.Ops {
@@ -137,11 +137,11 @@ func (d Deps) Postcheck(ctx context.Context, m *manifest.Manifest, schema []mani
 			if isRegular(s) && library.IsVideo(s) {
 				probePaths = append(probePaths, s)
 			}
-		case op.Kind == manifest.KindTitle || op.Kind == manifest.KindFlags || op.Kind == manifest.KindAudioLang:
+		case op.Kind == manifest.KindTitle || op.Kind == manifest.KindFlags || op.IsLang():
 			if isRegular(s) {
 				probePaths = append(probePaths, s)
 			}
-			if op.Kind == manifest.KindAudioLang {
+			if op.IsLang() {
 				if langs[s] == nil {
 					langs[s] = map[int]string{}
 				}
@@ -198,7 +198,7 @@ func (d Deps) Postcheck(ctx context.Context, m *manifest.Manifest, schema []mani
 		return pr.info, true
 	}
 
-	// target is the probe of the file a title, flags or audio_lang op edited.
+	// target is the probe of the file a title, flags, audio_lang or video_lang op edited.
 	target := func(op manifest.Op, s string) (ffprobe.Info, bool) {
 		if !isRegular(s) {
 			add(op.N, "TARGET-MISSING", s, fmt.Sprintf("the file a %s op edited is not a regular file", op.Kind))
@@ -283,9 +283,9 @@ func (d Deps) Postcheck(ctx context.Context, m *manifest.Manifest, schema []mani
 				}
 			}
 
-		case op.Kind == manifest.KindAudioLang:
+		case op.IsLang():
 			if info, ok := target(op, s); ok {
-				for _, problem := range checkLangs(info.Streams, op.Langs) {
+				for _, problem := range checkLangs(info.Streams, op.Langs, op.LangType()) {
 					add(op.N, "LANG-MISMATCH", s, problem)
 				}
 			}
